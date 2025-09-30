@@ -1,14 +1,15 @@
-import './App.css'
-import Pages from "@/pages/index.jsx"
-import { Toaster } from "@/components/ui/toaster"
+import React from "react";
+import SignInGate from "@/components/SignInGate";   // add this import
+import { Routes, Route } from "react-router-dom";
+// (import your pages/components as before)
 
-function App() {
+export default function App() {
   return (
-    <>
-      <Pages />
-      <Toaster />
-    </>
-  )
+    <SignInGate>
+      {/* your existing app routes / layout */}
+      <Routes>
+        {/* ... */}
+      </Routes>
+    </SignInGate>
+  );
 }
-
-export default App 
