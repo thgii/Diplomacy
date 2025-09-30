@@ -1,4 +1,4 @@
-import { parseGame } from "../../../_utils";
+import { parseGame } from "../../_utils";
 
 export async function onRequestPost({ request, params, env }) {
   const { id } = params;
