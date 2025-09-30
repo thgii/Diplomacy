@@ -1,14 +1,14 @@
 import React from "react";
-import SignInGate from "@/components/SignInGate";   // add this import
 import { Routes, Route } from "react-router-dom";
-// (import your pages/components as before)
+import SignInGate from "@/components/SignInGate";
+// import your pages...
 
 export default function App() {
   return (
     <SignInGate>
-      {/* your existing app routes / layout */}
       <Routes>
-        {/* ... */}
+        {/* your routes */}
+        {/* <Route path="/" element={<Home/>} /> etc. */}
       </Routes>
     </SignInGate>
   );
