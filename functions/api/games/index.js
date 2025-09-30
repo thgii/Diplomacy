@@ -1,6 +1,25 @@
 import { parseGame, json } from "../../_utils.js";
 
 export async function onRequestGet({ env }) {
+  if (!env.DB) return json([]); // safe fallback
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS games (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL,
+      host_email TEXT,
+      status TEXT NOT NULL,
+      max_players INTEGER,
+      turn_length_hours INTEGER,
+      retreat_length_hours INTEGER,
+      random_assignment INTEGER,
+      players TEXT,
+      current_turn INTEGER,
+      current_phase TEXT,
+      game_state TEXT,
+      phase_deadline TEXT,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`
+  ).run();
   const { results } = await env.DB.prepare(
     "SELECT * FROM games ORDER BY created_at DESC"
   ).all();

@@ -29,6 +29,22 @@ export async function onRequestPost({ request, params, env }) {
   const body = await request.json().catch(() => ({}));
   const moveId = (globalThis.crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
+  if (!env.DB) return json({ error: "DB not configured" }, 503);
+  await env.DB.prepare(
+    `CREATE TABLE IF NOT EXISTS game_moves (
+      id TEXT PRIMARY KEY,
+      game_id TEXT NOT NULL,
+      email TEXT,
+      country TEXT,
+      turn_number INTEGER,
+      phase TEXT,
+      source_phase TEXT,
+      orders TEXT,
+      submitted INTEGER,
+      created_at TEXT DEFAULT (datetime('now'))
+    )`
+  ).run();
+
   await env.DB.prepare(
     `CREATE TABLE IF NOT EXISTS game_moves (
       id TEXT PRIMARY KEY,

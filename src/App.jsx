@@ -2,26 +2,25 @@
 import React from "react";
 import { Routes, Route, Navigate } from "react-router-dom";
 import SignInGate from "@/components/SignInGate";
-
-// Pages
-import GameLobby from "@/pages/GameLobby";   // <-- name matches component you render
+import Layout from "@/pages/Layout";
+import GameLobby from "@/pages/GameLobby";
 import GameBoard from "@/pages/GameBoard";
-import GameAdmin from "@/pages/GameAdmin";   // optional, if you actually have this page
+import GameAdmin from "@/pages/GameAdmin"; // if you have it
 
 export default function App() {
   return (
     <SignInGate>
       <Routes>
-        {/* Default: send "/" to /GameLobby */}
-        <Route path="/" element={<Navigate to="/GameLobby" replace />} />
-
-        {/* Actual pages */}
-        <Route path="/GameLobby" element={<GameLobby />} />
-        <Route path="/GameBoard" element={<GameBoard />} />
-        <Route path="/GameAdmin" element={<GameAdmin />} /> {/* remove if not needed */}
-
-        {/* Catch-all */}
-        <Route path="*" element={<Navigate to="/GameLobby" replace />} />
+        {/* Everything uses the Layout (which shows the left nav) */}
+        <Route element={<Layout />}>
+          {/* default route -> /GameLobby */}
+          <Route path="/" element={<Navigate to="/GameLobby" replace />} />
+          <Route path="/GameLobby" element={<GameLobby />} />
+          <Route path="/GameBoard" element={<GameBoard />} />
+          <Route path="/GameAdmin" element={<GameAdmin />} />
+          {/* Catch-all */}
+          <Route path="*" element={<Navigate to="/GameLobby" replace />} />
+        </Route>
       </Routes>
     </SignInGate>
   );
