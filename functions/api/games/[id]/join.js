@@ -1,8 +1,8 @@
-import { parseGame } from "../../_utils";
+import { parseGame, json } from "../../../_utils";
 
 export async function onRequestPost({ request, params, env }) {
   const { id } = params;
-  const caller = request.headers.get("x-player-id") || crypto.randomUUID();
+  const caller = request.headers.get("x-player-id") || (globalThis.crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
   const email = `${caller}@players.local`;
   const now = new Date().toISOString();
 
@@ -16,5 +16,5 @@ export async function onRequestPost({ request, params, env }) {
     await env.DB.prepare("UPDATE games SET players = ? WHERE id = ?")
       .bind(JSON.stringify(game.players), id).run();
   }
-  return Response.json(game);
+  return json(game);
 }

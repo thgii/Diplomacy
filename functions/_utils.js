@@ -6,3 +6,10 @@ export function parseGame(row) {
     game_state: row.game_state ? JSON.parse(row.game_state) : null,
   };
 }
+
+export function json(body, status = 200) {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}

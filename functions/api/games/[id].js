@@ -1,15 +1,15 @@
-import { parseGame } from "../../_utils";
+import { parseGame, json } from "../../_utils";
 
 export async function onRequestGet({ params, env }) {
   const { id } = params;
   const { results } = await env.DB.prepare("SELECT * FROM games WHERE id = ?").bind(id).all();
   const game = results[0] ? parseGame(results[0]) : null;
-  return game ? Response.json(game) : new Response("Not found", { status: 404 });
+  return game ? json(game) : new Response("Not found", { status: 404 });
 }
 
 export async function onRequestPatch({ request, params, env }) {
   const { id } = params;
-  const patch = await request.json();
+  const patch = await request.json().catch(() => ({}));
 
   const { results } = await env.DB.prepare("SELECT * FROM games WHERE id = ?").bind(id).all();
   if (!results[0]) return new Response("Not found", { status: 404 });
@@ -35,7 +35,7 @@ export async function onRequestPatch({ request, params, env }) {
     JSON.stringify(merged.game_state || null), merged.phase_deadline || null, id
   ).run();
 
-  return Response.json(merged);
+  return json(merged);
 }
 
 export async function onRequestDelete({ params, env }) {
