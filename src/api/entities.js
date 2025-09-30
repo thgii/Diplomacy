@@ -1,21 +1,24 @@
 // src/api/entities.js
 import { http, getPlayer, setPlayer } from "./http";
 
-// --- Simple "account" using only a name & a generated id ---
 export const User = {
-  async me() {
-    return getPlayer(); // { id, email, full_name, role }
+  me() {
+    // synchronous read from localStorage is fine here
+    return getPlayer(); // { id, email, full_name, role } | null
   },
-  async login() {
-    const name = prompt("Enter a display name (friends will see this):")?.trim() || "Diplomat";
-    const session = await http("/session", { method: "POST", body: JSON.stringify({ name }) });
-    setPlayer(session);
-    return session;
+  async login(name) {
+    const session = await http("/session", {
+      method: "POST",
+      body: JSON.stringify({ name })
+    });
+    setPlayer(session);     // store in localStorage
+    return session;         // <-- return it so the UI can set state immediately
   },
-  async logout() {
+  logout() {
     localStorage.removeItem("player");
   },
 };
+
 
 // --- Games ---
 export const Game = {
