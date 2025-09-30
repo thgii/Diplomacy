@@ -1,4 +1,4 @@
-import { json } from "../../_utils";
+import { json } from "../_utils.js";
 
 export async function onRequestPost({ request, env }) {
   const payload = await request.json().catch(() => ({}));

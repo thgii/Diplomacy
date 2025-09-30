@@ -1,4 +1,4 @@
-import { json } from "../../_utils";
+import { json } from "../../_utils.js";
 
 export async function onRequestPatch({ request, params, env }) {
   const { id } = params;

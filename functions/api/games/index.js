@@ -1,4 +1,4 @@
-import { parseGame, json } from "../../_utils";
+import { parseGame, json } from "../../_utils.js";
 
 export async function onRequestGet({ env }) {
   const { results } = await env.DB.prepare(
