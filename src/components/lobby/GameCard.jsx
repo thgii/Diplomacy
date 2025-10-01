@@ -340,9 +340,7 @@ export default function GameCard({ game, onJoin, onDelete, user, getCountryColor
                 <div className="flex gap-2">
                   {game.status === "in_progress" && (
                     <Link 
-                      to={createPageUrl(`GameBoard?gameId=${game.id}`)}
-                      className="flex-1"
-                    >
+                      to={createPageUrl("GameBoard", { gameId: game.id })} className="flex-1">
                       <Button size="sm" className="w-full bg-green-600 hover:bg-green-700">
                         <Play className="w-4 h-4 mr-1" />
                         Play
@@ -350,9 +348,7 @@ export default function GameCard({ game, onJoin, onDelete, user, getCountryColor
                     </Link>
                   )}
                   <Link 
-                    to={createPageUrl(`GameBoard?gameId=${game.id}`)}
-                    className="flex-1"
-                  >
+                    to={createPageUrl("GameBoard", { gameId: game.id })} className="flex-1">
                     <Button 
                       variant="outline" 
                       size="sm" 

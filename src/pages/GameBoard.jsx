@@ -76,13 +76,36 @@ export default function GameBoard() {
   const autoAdvanceFiredRef = useRef(false);
 
   // --------- Effective game id (URL first, else loaded game) ----------
-  const urlParams = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
-  const gameId = urlParams.get("gameId");
-  const effectiveId = useCallback(() => gameId || game?.id || null, [gameId, game?.id]);
-  const [effectiveGameId, setEffectiveGameId] = useState(gameId || null);
-  useEffect(() => {
-    setEffectiveGameId(gameId || game?.id || null);
-  }, [gameId, game?.id]);
+// --------- Effective game id (URL first, then path, then last-viewed, then loaded game) ----------
+const url = typeof window !== "undefined" ? new URL(window.location.href) : null;
+const qsId = url ? url.searchParams.get("gameId") : null;
+// Support routes like /game/123 or /games/123
+const pathId = typeof window !== "undefined"
+  ? (window.location.pathname.match(/\/games?\/([^/?#]+)/)?.[1] || null)
+  : null;
+// Remember the last opened game so reloads without a query still work
+const storedId = typeof window !== "undefined" ? localStorage.getItem("lastViewedGameId") : null;
+
+const [game, setGame] = useState(null);
+// ...
+const [effectiveGameId, setEffectiveGameId] = useState(qsId || pathId || storedId || null);
+const effectiveId = useCallback(
+  () => (qsId || pathId || storedId || game?.id || null),
+  [qsId, pathId, storedId, game?.id]
+);
+
+useEffect(() => {
+  const next = (qsId || pathId || storedId || game?.id || null);
+  setEffectiveGameId(next);
+}, [qsId, pathId, storedId, game?.id]);
+
+// When we successfully load a game, persist it for refreshes
+useEffect(() => {
+  if (game?.id && typeof window !== "undefined") {
+    localStorage.setItem("lastViewedGameId", game.id);
+  }
+}, [game?.id]);
+
 
   // --------- Resize listener (fixes dangling "innerWidth);" error) ----------
   useEffect(() => {
@@ -122,16 +145,48 @@ export default function GameBoard() {
 
   // --------- Game loader ----------
   const loadGameData = useCallback(async () => {
-    try {
-      const currentUser = await User.me();
-      setUser(currentUser);
+  try {
+    const currentUser = await User.me();
+    setUser(currentUser);
 
-      const idToLoad = gameId || game?.id || null;
-      if (!idToLoad) {
-        console.warn("No game id available (no ?gameId= and no game in state).");
-        setLoading(false);
-        return;
+    // Try all the easy sources first
+    let idToLoad = effectiveId();
+
+    // If still no id, try to find a reasonable default:
+    if (!idToLoad) {
+      // 1) Look for any game the user is in (prefer in_progress, then waiting), newest first
+      const all = await Game.list();
+      const mine = (all || [])
+        .filter(g => Array.isArray(g.players) && g.players.some(p => p.email === currentUser.email))
+        .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
+
+      const pick =
+        mine.find(g => g.status === "in_progress") ||
+        mine.find(g => g.status === "waiting") ||
+        mine[0];
+
+      if (pick?.id) {
+        idToLoad = pick.id;
+        // Optionally push the id into the URL so refreshes have it:
+        try {
+          const u = new URL(window.location.href);
+          u.searchParams.set("gameId", idToLoad);
+          window.history.replaceState({}, "", u.toString());
+        } catch {}
       }
+    }
+
+    if (!idToLoad) {
+      console.warn("No game id available (no ?gameId=, no path id, no remembered id, and none discovered).");
+      setLoading(false);
+      return;
+    }
+
+    const currentGame = await Game.get(idToLoad);
+    if (!currentGame) {
+      setLoading(false);
+      return;
+    }
 
       const currentGame = await Game.get(idToLoad);
       if (currentGame) {

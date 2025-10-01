@@ -60,7 +60,7 @@ export default function GameLobby() {
       // Fetch latest message for each user game concurrently
       const gameMessagePromises = userGames.map(async (game) => {
         try {
-            const latestMessages = await ChatMessage.filter({ game_id: game.id }, "-created_date", 1);
+            const latestMessages = await ChatMessage.filter({ game_id: game.id });
             return { gameId: game.id, latestMessageTime: latestMessages.length > 0 ? latestMessages[0].created_date : null };
         } catch (error) {
             console.error(`Error fetching messages for game ${game.id}:`, error);
@@ -162,7 +162,7 @@ export default function GameLobby() {
       
       setShowCreateDialog(false);
       // Redirect to the newly created game
-      navigate(createPageUrl(`GameBoard?gameId=${newGame.id}`));
+      navigate(createPageUrl("GameBoard", { gameId: newGame.id }));
     } catch (error) {
       console.error("Error creating game:", error);
     }
