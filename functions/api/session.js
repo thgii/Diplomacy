@@ -110,13 +110,6 @@ function parseCookies(header) {
   }, {});
 }
 
-function json(obj, status = 200) {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: { "Content-Type": "application/json" },
-  });
-}
-
 function withSessionCookie(resp, playerId) {
   const headers = new Headers(resp.headers);
   headers.set("Set-Cookie", cookieString("player_id", playerId, { httpOnly: true, sameSite: "Lax" }));
