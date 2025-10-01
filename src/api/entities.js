@@ -3,19 +3,35 @@ import { http, getPlayer, setPlayer } from "./http";
 
 // ---------- User ----------
 export const User = {
-  me() {
-    return getPlayer(); // { id, email, full_name, role } | null
+  async me() {
+    // Prefer server session (cookie); fall back to local cache
+    try {
+      const res = await http("/session", { method: "GET" });
+      if (res && res.id) {
+        setPlayer(res);
+        return res;
+      }
+    } catch {}
+    return getPlayer();
   },
-  async login(name) {
+
+  async login(nickname, passcode) {
+    const payload = { nickname };
+    if (passcode) payload.passcode = passcode;
     const session = await http("/session", {
       method: "POST",
-      body: JSON.stringify({ name }),
+      body: JSON.stringify(payload),
     });
+    // If server returns passcode on first create, keep it in memory for showing,
+    // but don't persist it to localStorage.
+    const { passcode: maybePass } = session || {};
     setPlayer(session);
-    return session;
+    return session; // { id, nickname, ... , passcode? }
   },
-  logout() {
-    localStorage.removeItem("player");
+
+  async logout() {
+    await http("/session", { method: "DELETE" });
+    setPlayer(null);
   },
 };
 
