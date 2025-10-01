@@ -24,12 +24,15 @@ export async function onRequestPost({ request, env }) {
   const retreat_length_hours = num(body.retreat_length_hours ?? body.retreatLengthHours, 24);
   const random_assignment = bool(body.random_assignment ?? body.randomAssignment);
   const players = Array.isArray(body.players) ? body.players : [];
-  const game_state = body.game_state ?? null;
 
+  // Always create a well-formed game_state, even if the client omits it
+  const normalized_game_state = normalizeGameState(body.game_state);
+
+  // Core defaults for a new game
   const id = globalThis.crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2);
   const phase_deadline = null;
-  const current_turn = 0;
-  const current_phase = "Spring-1901-Moves";
+  const current_turn = 0; // keep your app's convention
+  const current_phase = "Spring-1901-Moves"; // keep your app's convention
   const status = "waiting";
   const host_email = (body.host_email || "").toString() || null;
 
@@ -43,7 +46,7 @@ export async function onRequestPost({ request, env }) {
     id, name, host_email, status, max_players,
     turn_length_hours, retreat_length_hours, random_assignment ? 1 : 0,
     JSON.stringify(players), current_turn, current_phase,
-    game_state ? JSON.stringify(game_state) : null, phase_deadline
+    JSON.stringify(normalized_game_state), phase_deadline
   ).run();
 
   const { results } = await env.DB
@@ -78,3 +81,30 @@ async function ensureGamesTable(env) {
 
 function num(v, d = 0) { const n = Number(v); return Number.isFinite(n) ? n : d; }
 function bool(v) { return v === true || v === 1 || v === "1" || v === "true"; }
+
+/**
+ * Ensure we always store a well-formed game_state at creation.
+ * - Keeps any extra keys the client might send
+ * - Guarantees the critical fields exist with correct shapes
+ */
+function normalizeGameState(gs) {
+  const base = {
+    units: [],
+    supply_centers: {},
+    last_turn_results: null,
+    pending_retreats: [],
+  };
+
+  // If nothing valid provided, return the base
+  if (!gs || typeof gs !== "object") return base;
+
+  // Merge while enforcing shapes on critical fields
+  return {
+    ...base,
+    ...gs,
+    units: Array.isArray(gs.units) ? gs.units : [],
+    supply_centers: (gs.supply_centers && typeof gs.supply_centers === "object") ? gs.supply_centers : {},
+    last_turn_results: gs.last_turn_results ?? null,
+    pending_retreats: Array.isArray(gs.pending_retreats) ? gs.pending_retreats : [],
+  };
+}
