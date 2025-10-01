@@ -1,6 +1,27 @@
 import { json } from "../../../_utils.js";
 
+async function ensureMovesTable(env) {
+  await env.DB.prepare(`
+    CREATE TABLE IF NOT EXISTS game_moves (
+      id TEXT PRIMARY KEY,
+      game_id TEXT NOT NULL,
+      email TEXT,
+      country TEXT,
+      turn_number INTEGER,
+      phase TEXT,
+      source_phase TEXT,
+      orders TEXT,
+      submitted INTEGER,
+      created_at TEXT DEFAULT (datetime('now'))
+    )
+  `).run();
+  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_moves_game ON game_moves(game_id)`).run();
+}
+
 export async function onRequestGet({ request, params, env }) {
+  if (!env.DB) return json({ error: "DB not configured" }, 503);
+  await ensureMovesTable(env);
+
   const { id } = params;
   const url = new URL(request.url);
   const q = Object.fromEntries(url.searchParams);
@@ -25,40 +46,12 @@ export async function onRequestGet({ request, params, env }) {
 }
 
 export async function onRequestPost({ request, params, env }) {
+  if (!env.DB) return json({ error: "DB not configured" }, 503);
+  await ensureMovesTable(env);
+
   const { id } = params; // game id
   const body = await request.json().catch(() => ({}));
   const moveId = (globalThis.crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
-
-  if (!env.DB) return json({ error: "DB not configured" }, 503);
-  await env.DB.prepare(
-    `CREATE TABLE IF NOT EXISTS game_moves (
-      id TEXT PRIMARY KEY,
-      game_id TEXT NOT NULL,
-      email TEXT,
-      country TEXT,
-      turn_number INTEGER,
-      phase TEXT,
-      source_phase TEXT,
-      orders TEXT,
-      submitted INTEGER,
-      created_at TEXT DEFAULT (datetime('now'))
-    )`
-  ).run();
-
-  await env.DB.prepare(
-    `CREATE TABLE IF NOT EXISTS game_moves (
-      id TEXT PRIMARY KEY,
-      game_id TEXT NOT NULL,
-      email TEXT,
-      country TEXT,
-      turn_number INTEGER,
-      phase TEXT,
-      source_phase TEXT,
-      orders TEXT,
-      submitted INTEGER,
-      created_at TEXT DEFAULT (datetime('now'))
-    )`
-  ).run();
 
   await env.DB.prepare(
     `INSERT INTO game_moves (id, game_id, email, country, turn_number, phase, source_phase, orders, submitted)
