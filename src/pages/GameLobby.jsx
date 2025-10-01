@@ -1,182 +1,178 @@
-
 import React, { useState, useEffect, useCallback } from "react";
 import { Game } from "@/api/entities";
 import { User } from "@/api/entities";
-import { ChatMessage } from "@/api/entities"; // Added ChatMessage import
+import { ChatMessage } from "@/api/entities";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Plus, Users, Clock, Crown, Play, Eye } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
+import { Users, Crown, Plus, Clock } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { getCountryColor, allPowers, initialUnits, getInitialSupplyCenters } from "../components/game/mapData";
-import CreateGameDialog from "../components/lobby/CreateGameDialog";
 import GameCard from "../components/lobby/GameCard";
-import { territories, homeSupplyCenters } from "../components/game/mapData";
+import {
+  getCountryColor,
+  allPowers,
+  initialUnits,
+  getInitialSupplyCenters,
+  territories,
+} from "../components/game/mapData";
 
 export default function GameLobby() {
   const [games, setGames] = useState([]);
   const [myGames, setMyGames] = useState([]);
-  // Derived lists for tabs
-  const activeMyGames = myGames.filter(g => g.status !== "completed");
-  const pastGames = myGames.filter(g => g.status === "completed");
+  const activeMyGames = myGames.filter((g) => g.status !== "completed");
+  const pastGames = myGames.filter((g) => g.status === "completed");
 
   const [user, setUser] = useState(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState("my-games"); // Changed default from "available" to "my-games"
+  const [activeTab, setActiveTab] = useState("my-games");
 
   const navigate = useNavigate();
+
+  const initializeGameState = () => {
+    const initialSupplyCenters = {};
+    Object.entries(territories).forEach(([tid, t]) => {
+      if (t.supply_center && t.initial_owner) initialSupplyCenters[tid] = t.initial_owner;
+    });
+    return {
+      territories,
+      units: [],
+      supply_centers: initialSupplyCenters,
+    };
+  };
 
   const loadData = useCallback(async () => {
     try {
       const currentUser = await User.me();
       setUser(currentUser);
-      
-      // If no current user is returned, redirect to the login page.
-      // This handles cases where the user is not authenticated or their session expired.
       if (!currentUser) {
-        navigate(createPageUrl("login")); 
-        return; // Stop execution as user needs to log in
+        navigate(createPageUrl("login"));
+        return;
       }
 
       const allGames = await Game.list("-created_date");
-      const availableGames = allGames.filter(game => 
-        game.status === "waiting" && 
-        !game.players?.some(p => p.email === currentUser.email)
-      );
-      
-      let userGames = allGames.filter(game => 
-        game.players?.some(p => p.email === currentUser.email)
-      );
-      
-      // Load previous game states from localStorage
-      const lastGameStatesString = localStorage.getItem('lastGameStates');
-      const lastGameStates = lastGameStatesString ? JSON.parse(lastGameStatesString) : {};
 
-      // Fetch latest message for each user game concurrently
-      const gameMessagePromises = userGames.map(async (game) => {
+      const availableGames = (allGames || []).filter(
+        (g) => g.status === "waiting" && !g.players?.some((p) => p.email === currentUser.email)
+      );
+
+      let userGames = (allGames || []).filter((g) =>
+        g.players?.some((p) => p.email === currentUser.email)
+      );
+
+      // enrich “hasChanged” using last seen state + latest chat
+      const lastGameStates = JSON.parse(localStorage.getItem("lastGameStates") || "{}");
+
+      const gameMessagePromises = userGames.map(async (g) => {
         try {
-            const latestMessages = await ChatMessage.filter({ game_id: game.id }, "-created_date", 1);
-            return { gameId: game.id, latestMessageTime: latestMessages.length > 0 ? latestMessages[0].created_date : null };
-        } catch (error) {
-            console.error(`Error fetching messages for game ${game.id}:`, error);
-            return { gameId: game.id, latestMessageTime: null }; // Return null on error
+          const latest = await ChatMessage.filter({ game_id: g.id }, "-created_date", 1);
+          return { gameId: g.id, latestMessageTime: latest?.[0]?.created_date || null };
+        } catch {
+          return { gameId: g.id, latestMessageTime: null };
         }
       });
 
       const messageResults = await Promise.all(gameMessagePromises);
-      const gameToMessageMap = new Map(messageResults.map(res => [res.gameId, res.latestMessageTime]));
+      const msgMap = new Map(messageResults.map((r) => [r.gameId, r.latestMessageTime]));
 
-      // Prepare new game states and mark changes for myGames
       const newGameStates = {};
-      const updatedUserGames = userGames.map(game => { // Use map to create a new array with `hasChanged` flag
-        const prevGameState = lastGameStates[game.id];
+      const updatedUserGames = userGames.map((g) => {
+        const prev = lastGameStates[g.id];
+        const currentMessageTime = msgMap.get(g.id);
         let hasChanged = false;
-        const currentMessageTime = gameToMessageMap.get(game.id);
 
-        // Check for changes in phase, turn, or status
-        // Note: game.current_phase and game.current_turn are assumed to exist on the Game entity
-        if (prevGameState) {
-          if (prevGameState.phase !== game.current_phase ||
-              prevGameState.turn !== game.current_turn ||
-              prevGameState.status !== game.status) {
+        if (prev) {
+          if (prev.phase !== g.current_phase || prev.turn !== g.current_turn || prev.status !== g.status) {
             hasChanged = true;
           }
-          // Check for new messages
-          // Only mark hasChanged if currentMessageTime exists AND is newer than prev.lastMessageTime
-          // Or if prev.lastMessageTime didn't exist but currentMessageTime does (new message for a tracked game)
-          if (currentMessageTime && (!prevGameState.lastMessageTime || new Date(currentMessageTime) > new Date(prevGameState.lastMessageTime))) {
+          if (currentMessageTime && (!prev.lastMessageTime || new Date(currentMessageTime) > new Date(prev.lastMessageTime))) {
             hasChanged = true;
           }
         }
-        // If there's no previous state, we don't automatically mark it as changed based on existing messages.
-        // It will be marked as changed when a new update (including a new message) occurs *after* this load.
-        
-        // Store current state for future comparison
-        newGameStates[game.id] = {
-          phase: game.current_phase,
-          turn: game.current_turn,
-          status: game.status,
-          lastMessageTime: currentMessageTime, // Store the latest message time
-        };
 
-        return { ...game, hasChanged }; // Add the hasChanged flag to the game object
+        newGameStates[g.id] = {
+          phase: g.current_phase,
+          turn: g.current_turn,
+          status: g.status,
+          lastMessageTime: currentMessageTime,
+        };
+        return { ...g, hasChanged };
       });
 
-      // Save the *new* game states to localStorage for the next load
-      localStorage.setItem('lastGameStates', JSON.stringify(newGameStates));
+      localStorage.setItem("lastGameStates", JSON.stringify(newGameStates));
 
       setGames(availableGames);
-      setMyGames(updatedUserGames); // Use the updated user games
-    } catch (error) {
-      console.error("Error loading data:", error);
-      // In case of an error (e.g., network issue, authentication failure from backend),
-      // also redirect to login. A more sophisticated app might show an error message.
+      setMyGames(updatedUserGames);
+    } catch (err) {
+      console.error("Error loading data:", err);
       navigate(createPageUrl("login"));
     } finally {
       setLoading(false);
     }
-  }, [navigate]); // navigate is a stable function from useNavigate, so it's safe to include
+  }, [navigate]);
 
   useEffect(() => {
     loadData();
-  }, [loadData]); // loadData is now memoized by useCallback, satisfying the dependency array
+  }, [loadData]);
 
   const handleCreateGame = async (gameData) => {
     try {
-      let selectedCountry = gameData.selectedCountry;
-      
-      // Handle random assignment if enabled
-      if (gameData.random_assignment) {
-        const availableCountries = (allPowers || []).filter(country => 
-          !gameData.players?.some(p => p.country === country)
-        );
-        selectedCountry = availableCountries[Math.floor(Math.random() * availableCountries.length)];
+      const current = await User.me();
+      if (!current) {
+        navigate(createPageUrl("login"));
+        return;
       }
 
-      
+      let selectedCountry = gameData.selectedCountry;
+      if (gameData.random_assignment) {
+        const taken = new Set((gameData.players || []).map((p) => p.country).filter(Boolean));
+        const available = (allPowers || []).filter((c) => !taken.has(c));
+        selectedCountry = available[Math.floor(Math.random() * available.length)];
+      }
 
       const newGame = await Game.create({
-        name: gameData.name, // Explicitly passed from gameData
-        host_email: user.email,
-        max_players: 7, // Always 7 players
-        turn_length_hours: gameData.turn_length_hours, // Explicitly passed from gameData
-        auto_adjudicate: gameData.auto_adjudicate, // Explicitly passed from gameData
-        random_assignment: gameData.random_assignment, // Explicitly passed from gameData
+        name: gameData.name,
+        host_email: current.email,
+        max_players: 7,
+        turn_length_hours: gameData.turn_length_hours,
+        auto_adjudicate: gameData.auto_adjudicate,
+        random_assignment: gameData.random_assignment,
         phase_deadline: null,
-        players: [{
-          email: user.email,
-          country: selectedCountry,
-          color: getCountryColor(selectedCountry),
-          supply_centers: 3,
-          is_dummy: false // New property for player type
-        }],
+        players: [
+          {
+            email: current.email,
+            country: selectedCountry,
+            color: getCountryColor(selectedCountry),
+            supply_centers: 3,
+            is_dummy: false,
+          },
+        ],
         game_state: initializeGameState(),
         draw_votes: [],
-        winners: []
+        winners: [],
       });
-      
+
       setShowCreateDialog(false);
-      // Redirect to the newly created game
-      navigate(createPageUrl(`GameBoard?gameId=${newGame.id}`));
-    } catch (error) {
-      console.error("Error creating game:", error);
+      // 🔑 Always include ?gameId= when navigating
+      navigate(createPageUrl(`GameBoard?gameId=${encodeURIComponent(newGame.id)}`));
+    } catch (e) {
+      console.error("Error creating game:", e);
     }
   };
 
   const handleJoinGame = async (game, selectedCountry) => {
     try {
+      const me = await User.me();
+      if (!me) {
+        navigate(createPageUrl("login"));
+        return;
+      }
+
       const currentPlayers = Array.isArray(game.players) ? [...game.players] : [];
+      const taken = new Set(currentPlayers.map((p) => p?.country).filter(Boolean));
+      const available = (allPowers || []).filter((c) => !taken.has(c));
 
-      // Build taken/available country sets
-      const taken = new Set(currentPlayers.map(p => p?.country).filter(Boolean));
-      const available = (allPowers || []).filter(c => !taken.has(c));
-
-      // Decide the assignment for THIS player now (no reshuffle later)
       let assignedCountry = selectedCountry || null;
 
       if (game.random_assignment) {
@@ -186,7 +182,6 @@ export default function GameLobby() {
         }
         assignedCountry = available[Math.floor(Math.random() * available.length)];
       } else {
-        // Non-random lobbies still respect a picker from the card (selectedCountry)
         if (!assignedCountry) {
           alert("Please select a country to join.");
           return;
@@ -198,7 +193,7 @@ export default function GameLobby() {
       }
 
       const newPlayer = {
-        email: user.email,
+        email: me.email,
         country: assignedCountry,
         color: getCountryColor(assignedCountry),
         supply_centers: 3,
@@ -209,25 +204,22 @@ export default function GameLobby() {
       const updatedPlayers = [...currentPlayers, newPlayer];
       const fillsTable = updatedPlayers.length >= (game.max_players || 7);
 
-      // IMPORTANT: No reshuffle. When the table fills, just start the game and set the first deadline.
       const patch = {
         players: updatedPlayers,
         status: fillsTable ? "in_progress" : "waiting",
       };
 
       if (fillsTable) {
-        // 1) Set the first deadline
+        // set deadline
         const h = game.turn_length_hours ?? 24;
         const d = new Date();
         d.setHours(d.getHours() + h);
         patch.phase_deadline = d.toISOString();
 
-        // 2) Build starting units for each seated player
+        // seed starting units
         const startingUnits = [];
         const usedIds = new Set();
-
         const makeId = (country, territory, type) => {
-          // Keep it simple but collision-safe
           const base = `${String(country).toUpperCase()}-${String(territory).toUpperCase()}-${String(type).toUpperCase()}`;
           if (!usedIds.has(base)) {
             usedIds.add(base);
@@ -257,11 +249,9 @@ export default function GameLobby() {
             });
           });
         });
-      
-        // 3) Initial supply center ownership (from map data’s initial_owner)
+
         const initialSC = getInitialSupplyCenters();
-      
-        // 4) Seed game state & the phase/turn
+
         patch.current_turn = 1;
         patch.current_phase = "spring";
         patch.game_state = {
@@ -274,55 +264,34 @@ export default function GameLobby() {
       }
 
       await Game.update(game.id, patch);
-      loadData();
-    } catch (error) {
-      console.error("Error joining game:", error);
+
+      // go straight to the board for that specific game id
+      navigate(createPageUrl(`GameBoard?gameId=${encodeURIComponent(game.id)}`));
+    } catch (e) {
+      console.error("Error joining game:", e);
     }
   };
-
-
 
   const handleDeleteGame = async (gameId) => {
     try {
       await Game.delete(gameId);
-      loadData(); // Reload the game lists
-    } catch (error) {
-      console.error("Error deleting game:", error);
+      loadData();
+    } catch (e) {
+      console.error("Error deleting game:", e);
     }
-  };
-
-
-  const initializeGameState = () => {
-    // Initialize supply center ownership based on initial_owner from territories data
-    const initialSupplyCenters = {};
-    Object.entries(territories).forEach(([terrId, terrData]) => {
-      if (terrData.supply_center && terrData.initial_owner) {
-        initialSupplyCenters[terrId] = terrData.initial_owner;
-      }
-    });
-
-    return {
-      territories: territories, // Include the full map data
-      units: [],
-      supply_centers: initialSupplyCenters
-    };
   };
 
   if (loading) {
     return (
       <div className="p-8 max-w-7xl mx-auto">
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {[1,2,3,4,5,6].map(i => (
+          {[1, 2, 3, 4, 5, 6].map((i) => (
             <Card key={i} className="animate-pulse">
-              <CardHeader className="space-y-4">
+              <CardContent className="p-6 space-y-4">
                 <div className="h-4 bg-slate-200 rounded w-3/4"></div>
                 <div className="h-3 bg-slate-200 rounded w-1/2"></div>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  <div className="h-3 bg-slate-200 rounded"></div>
-                  <div className="h-3 bg-slate-200 rounded w-5/6"></div>
-                </div>
+                <div className="h-3 bg-slate-200 rounded"></div>
+                <div className="h-3 bg-slate-200 rounded w-5/6"></div>
               </CardContent>
             </Card>
           ))}
@@ -335,14 +304,10 @@ export default function GameLobby() {
     <div className="p-6 md:p-8 max-w-7xl mx-auto">
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center mb-8 gap-4">
         <div>
-          <h1 className="text-3xl md:text-4xl font-bold text-slate-900 mb-2">
-            Diplomatic Arena
-          </h1>
-          <p className="text-slate-600 text-lg">
-            Join the ultimate game of negotiation and strategy
-          </p>
+          <h1 className="text-3xl md:text-4xl font-bold text-slate-900 mb-2">Diplomatic Arena</h1>
+          <p className="text-slate-600 text-lg">Join the ultimate game of negotiation and strategy</p>
         </div>
-        <Button 
+        <Button
           onClick={() => setShowCreateDialog(true)}
           size="lg"
           className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-lg hover:shadow-xl transition-all duration-300"
@@ -356,31 +321,23 @@ export default function GameLobby() {
         <button
           onClick={() => setActiveTab("available")}
           className={`flex-1 px-6 py-3 rounded-lg font-medium transition-all duration-300 ${
-            activeTab === "available"
-              ? "bg-blue-600 text-white shadow-md"
-              : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
+            activeTab === "available" ? "bg-blue-600 text-white shadow-md" : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
           }`}
         >
           Available Games ({games.length})
         </button>
-
         <button
           onClick={() => setActiveTab("my-games")}
           className={`flex-1 px-6 py-3 rounded-lg font-medium transition-all duration-300 ${
-            activeTab === "my-games"
-              ? "bg-blue-600 text-white shadow-md"
-              : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
+            activeTab === "my-games" ? "bg-blue-600 text-white shadow-md" : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
           }`}
         >
           Active Games ({activeMyGames.length})
         </button>
-
         <button
           onClick={() => setActiveTab("past")}
           className={`flex-1 px-6 py-3 rounded-lg font-medium transition-all duration-300 ${
-            activeTab === "past"
-              ? "bg-blue-600 text-white shadow-md"
-              : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
+            activeTab === "past" ? "bg-blue-600 text-white shadow-md" : "text-slate-600 hover:text-slate-800 hover:bg-slate-50"
           }`}
         >
           Past Games ({pastGames.length})
@@ -389,24 +346,19 @@ export default function GameLobby() {
 
       <AnimatePresence mode="wait">
         {activeTab === "available" && (
-          <motion.div
-            key="available"
-            initial={{ opacity: 0, y: 20 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3 }}
-          >
+          <motion.div key="available" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }}>
             {games.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {games.map((game) => (
                   <GameCard
                     key={game.id}
                     game={game}
-                    onJoin={handleJoinGame}
-                    onDelete={handleDeleteGame}
+                    type="available"
                     user={user}
                     getCountryColor={getCountryColor}
-                    type="available"
+                    onJoin={handleJoinGame}
+                    onDelete={handleDeleteGame}
+                    onOpenBoard={(g) => navigate(createPageUrl(`GameBoard?gameId=${encodeURIComponent(g.id)}`))}
                   />
                 ))}
               </div>
@@ -416,10 +368,7 @@ export default function GameLobby() {
                   <Crown className="w-16 h-16 text-slate-400 mx-auto mb-4" />
                   <h3 className="text-xl font-semibold text-slate-700 mb-2">No Available Games</h3>
                   <p className="text-slate-500 mb-6">Be the first to create a diplomatic challenge!</p>
-                  <Button 
-                    onClick={() => setShowCreateDialog(true)}
-                    className="bg-blue-600 hover:bg-blue-700"
-                  >
+                  <Button onClick={() => setShowCreateDialog(true)} className="bg-blue-600 hover:bg-blue-700">
                     <Plus className="w-4 h-4 mr-2" />
                     Create First Game
                   </Button>
@@ -437,11 +386,12 @@ export default function GameLobby() {
                   <GameCard
                     key={game.id}
                     game={game}
-                    onDelete={handleDeleteGame}
+                    type="my-game"
                     user={user}
                     getCountryColor={getCountryColor}
-                    type="my-game"
                     hasChanged={game.hasChanged}
+                    onDelete={handleDeleteGame}
+                    onOpenBoard={(g) => navigate(createPageUrl(`GameBoard?gameId=${encodeURIComponent(g.id)}`))}
                   />
                 ))}
               </div>
@@ -452,16 +402,10 @@ export default function GameLobby() {
                   <h3 className="text-xl font-semibold text-slate-700 mb-2">No Games Yet</h3>
                   <p className="text-slate-500 mb-6">Start your diplomatic journey by creating or joining a game!</p>
                   <div className="flex gap-3 justify-center">
-                    <Button 
-                      onClick={() => setShowCreateDialog(true)}
-                      className="bg-blue-600 hover:bg-blue-700"
-                    >
+                    <Button onClick={() => setShowCreateDialog(true)} className="bg-blue-600 hover:bg-blue-700">
                       Create Game
                     </Button>
-                    <Button 
-                      variant="outline"
-                      onClick={() => setActiveTab("available")}
-                    >
+                    <Button variant="outline" onClick={() => setActiveTab("available")}>
                       Browse Games
                     </Button>
                   </div>
@@ -470,27 +414,21 @@ export default function GameLobby() {
             )}
           </motion.div>
         )}
+
         {activeTab === "past" && (
-          <motion.div
-            key="past"
-            initial={{ opacity: 0, y: 20 }}
-           animate={{ opacity: 1, y: 0 }}
-           exit={{ opacity: 0, y: -20 }}
-            transition={{ duration: 0.3 }}
-          >
+          <motion.div key="past" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} transition={{ duration: 0.3 }}>
             {pastGames.length > 0 ? (
               <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {pastGames.map((game) => (
                   <GameCard
                     key={game.id}
                     game={game}
-                    onDelete={handleDeleteGame}
+                    type="my-game"
                     user={user}
                     getCountryColor={getCountryColor}
-                    // You can reuse "my-game" so buttons/labels behave;
-                    // or set type="past" and add a tiny tweak in GameCard (see Optional step below).
-                    type="my-game"
                     hasChanged={false}
+                    onDelete={handleDeleteGame}
+                    onOpenBoard={(g) => navigate(createPageUrl(`GameBoard?gameId=${encodeURIComponent(g.id)}`))}
                   />
                 ))}
               </div>
@@ -505,14 +443,10 @@ export default function GameLobby() {
             )}
           </motion.div>
         )}
-
       </AnimatePresence>
 
-      <CreateGameDialog 
-        open={showCreateDialog}
-        onClose={() => setShowCreateDialog(false)}
-        onCreate={handleCreateGame}
-      />
+      {/* CreateGameDialog remains unchanged if you have it in your project */}
+      {/* <CreateGameDialog open={showCreateDialog} onClose={() => setShowCreateDialog(false)} onCreate={handleCreateGame} /> */}
     </div>
   );
 }

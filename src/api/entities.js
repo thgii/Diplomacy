@@ -20,11 +20,8 @@ export const User = {
     if (passcode) payload.passcode = passcode;
     const session = await http("/session", {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: payload, // http() will JSON.stringify
     });
-    // If server returns passcode on first create, keep it in memory for showing,
-    // but don't persist it to localStorage.
-    const { passcode: maybePass } = session || {};
     setPlayer(session);
     return session; // { id, nickname, ... , passcode? }
   },
@@ -38,8 +35,10 @@ export const User = {
 // ---------- Game ----------
 export const Game = {
   async get(id) {
-    return http(`/games/${id}`);
+    if (!id) throw new Error("Game.get: missing id");
+    return http(`/games/${encodeURIComponent(id)}`);
   },
+
   async list() {
     try {
       const r = await http("/games");
@@ -48,10 +47,6 @@ export const Game = {
       console.error("Game.list failed:", e);
       return [];
     }
-  },
-
-  async get(id) {
-    return http(`/games/${id}`);
   },
 
   async create(data) {
@@ -65,19 +60,27 @@ export const Game = {
       selectedCountry: data?.selectedCountry ?? null,
       units: data?.units,
       game_state: data?.game_state,
+      host_email: data?.host_email, // preserve if you pass it
+      players: data?.players,       // preserve if you pass it
+      auto_adjudicate: data?.auto_adjudicate,
+      draw_votes: data?.draw_votes,
+      winners: data?.winners,
+      phase_deadline: data?.phase_deadline ?? null,
     };
-    return http("/games", { method: "POST", body: JSON.stringify(payload) });
+    return http("/games", { method: "POST", body: payload });
   },
 
   async update(id, patch) {
-    return http(`/games/${id}`, {
+    if (!id) throw new Error("Game.update: missing id");
+    return http(`/games/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify(patch),
+      body: patch, // http() will JSON.stringify
     });
   },
 
   async delete(id) {
-    return http(`/games/${id}`, { method: "DELETE" });
+    if (!id) throw new Error("Game.delete: missing id");
+    return http(`/games/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
   async filter(q = {}) {
@@ -89,39 +92,52 @@ export const Game = {
 // ---------- GameMove ----------
 export const GameMove = {
   async filter(q) {
+    // q: { game_id, turn_number?, phase?, submitted?, source_phase?, player_email? ... }
     const { game_id, ...rest } = q || {};
+    if (!game_id) throw new Error("GameMove.filter: missing game_id");
     const qs = new URLSearchParams(rest).toString();
-    return http(`/games/${game_id}/moves${qs ? `?${qs}` : ""}`);
+    return http(`/games/${encodeURIComponent(game_id)}/moves${qs ? `?${qs}` : ""}`);
   },
 
   async create(data) {
+    // data: { game_id, player_email, country, turn_number, phase, orders, submitted, source_phase? }
     const { game_id, ...payload } = data || {};
-    return http(`/games/${game_id}/moves`, {
+    if (!game_id) throw new Error("GameMove.create: missing game_id");
+    return http(`/games/${encodeURIComponent(game_id)}/moves`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: payload,
     });
   },
 
   async update(id, patch) {
-    return http(`/moves/${id}`, {
+    if (!id) throw new Error("GameMove.update: missing id");
+    return http(`/moves/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: JSON.stringify(patch),
+      body: patch,
     });
   },
 };
 
 // ---------- ChatMessage ----------
 export const ChatMessage = {
-  async filter(q) {
+  // Support optional sort & limit, since you call filter({ game_id }, "-created_date", 1)
+  async filter(q, sort, limit) {
     const { game_id } = q || {};
-    return http(`/games/${game_id}/chat`);
+    if (!game_id) throw new Error("ChatMessage.filter: missing game_id");
+    const params = new URLSearchParams();
+    if (sort) params.set("sort", sort);
+    if (Number.isFinite(limit)) params.set("limit", String(limit));
+    const qs = params.toString();
+    return http(`/games/${encodeURIComponent(game_id)}/chat${qs ? `?${qs}` : ""}`);
   },
 
   async create(data) {
+    // data: { game_id, thread_id?, thread_participants?, sender_email, sender_country, message }
     const { game_id, ...payload } = data || {};
-    return http(`/games/${game_id}/chat`, {
+    if (!game_id) throw new Error("ChatMessage.create: missing game_id");
+    return http(`/games/${encodeURIComponent(game_id)}/chat`, {
       method: "POST",
-      body: JSON.stringify(payload),
+      body: payload,
     });
   },
 };
