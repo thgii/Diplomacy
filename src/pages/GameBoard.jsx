@@ -86,7 +86,6 @@ const pathId = typeof window !== "undefined"
 // Remember the last opened game so reloads without a query still work
 const storedId = typeof window !== "undefined" ? localStorage.getItem("lastViewedGameId") : null;
 
-const [game, setGame] = useState(null);
 // ...
 const [effectiveGameId, setEffectiveGameId] = useState(qsId || pathId || storedId || null);
 const effectiveId = useCallback(
@@ -149,112 +148,91 @@ useEffect(() => {
     const currentUser = await User.me();
     setUser(currentUser);
 
-    // Try all the easy sources first
-    let idToLoad = effectiveId();
+    // Prefer explicit query param, else already-loaded game id
+    const idFromUrl = gameId || null;
+    let idToLoad = idFromUrl || (game?.id ?? null);
 
-    // If still no id, try to find a reasonable default:
+    // Final guard
     if (!idToLoad) {
-      // 1) Look for any game the user is in (prefer in_progress, then waiting), newest first
-      const all = await Game.list();
-      const mine = (all || [])
-        .filter(g => Array.isArray(g.players) && g.players.some(p => p.email === currentUser.email))
-        .sort((a, b) => new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0));
-
-      const pick =
-        mine.find(g => g.status === "in_progress") ||
-        mine.find(g => g.status === "waiting") ||
-        mine[0];
-
-      if (pick?.id) {
-        idToLoad = pick.id;
-        // Optionally push the id into the URL so refreshes have it:
-        try {
-          const u = new URL(window.location.href);
-          u.searchParams.set("gameId", idToLoad);
-          window.history.replaceState({}, "", u.toString());
-        } catch {}
-      }
-    }
-
-    if (!idToLoad) {
-      console.warn("No game id available (no ?gameId=, no path id, no remembered id, and none discovered).");
+      console.warn("No game id available (no ?gameId= and no game in state).");
       setLoading(false);
       return;
     }
 
-    const currentGame = await Game.get(idToLoad);
+    // IMPORTANT: use a single variable; do not redeclare 'currentGame' elsewhere in this function
+    let currentGame = await Game.get(idToLoad);
     if (!currentGame) {
       setLoading(false);
       return;
     }
 
-      const currentGame = await Game.get(idToLoad);
-      if (currentGame) {
-        if (currentGame.game_state?.supply_centers) {
-          const updatedPlayers = currentGame.players.map((player) => {
-            const count = Object.values(currentGame.game_state.supply_centers).filter((owner) => owner === player.country).length;
-            return { ...player, supply_centers: count };
-          });
-          currentGame.players = updatedPlayers;
-        }
+    // Derive supply center counts onto players for display
+    if (currentGame.game_state?.supply_centers) {
+      const updatedPlayers = (currentGame.players || []).map((player) => {
+        const count = Object.values(currentGame.game_state.supply_centers)
+          .filter((owner) => owner === player.country).length;
+        return { ...player, supply_centers: count };
+      });
+      currentGame = { ...currentGame, players: updatedPlayers };
+    }
 
-        setGame(currentGame);
-        setUnits(currentGame.game_state?.units || initialUnits || []);
+    setGame(currentGame);
+    setUnits(currentGame.game_state?.units || initialUnits || []);
 
-        if (currentGame.game_state?.last_turn_results) {
-          setLastTurnResults(currentGame.game_state.last_turn_results);
-        } else {
-          setLastTurnResults(null);
-        }
+    if (currentGame.game_state?.last_turn_results) {
+      setLastTurnResults(currentGame.game_state.last_turn_results);
+    } else {
+      setLastTurnResults(null);
+    }
 
-        // Reset local order-ish state each load
+    // Reset local order-ish state each load
+    setOrders({});
+    setWinterActions([]);
+    setRetreatOrders({});
+    setIsSubmitted(false);
+
+    // Pull any previously saved moves for this player/turn/phase
+    const filter = {
+      game_id: currentGame.id,
+      player_email: currentUser.email,
+      turn_number: currentGame.current_turn,
+      phase: currentGame.current_phase,
+    };
+
+    if (currentGame.current_phase === "retreat") {
+      const sourcePhase = currentGame.game_state?.phase_after_retreat === "fall" ? "spring" : "fall";
+      filter.source_phase = sourcePhase;
+    }
+
+    const savedMoves = await GameMove.filter(filter);
+    if (savedMoves.length > 0) {
+      const move = savedMoves[0];
+      if (move && move.orders) {
+        setOrders(move.orders || {});
+        setWinterActions(move.winter_actions || []);
+        setRetreatOrders(move.retreat_orders || {});
+        setIsSubmitted(!!move.submitted);
+      } else {
         setOrders({});
         setWinterActions([]);
         setRetreatOrders({});
         setIsSubmitted(false);
-
-        const filter = {
-          game_id: currentGame.id,
-          player_email: currentUser.email,
-          turn_number: currentGame.current_turn,
-          phase: currentGame.current_phase,
-        };
-
-        if (currentGame.current_phase === "retreat") {
-          const sourcePhase = currentGame.game_state?.phase_after_retreat === "fall" ? "spring" : "fall";
-          filter.source_phase = sourcePhase;
-        }
-
-        const savedMoves = await GameMove.filter(filter);
-        if (savedMoves.length > 0) {
-          const move = savedMoves[0];
-          if (move && move.orders) {
-            setOrders(move.orders || {});
-            setWinterActions(move.winter_actions || []);
-            setRetreatOrders(move.retreat_orders || {});
-            setIsSubmitted(!!move.submitted);
-          } else {
-            setOrders({});
-            setWinterActions([]);
-            setRetreatOrders({});
-            setIsSubmitted(false);
-          }
-        } else {
-          setOrders({});
-          setWinterActions([]);
-          setRetreatOrders({});
-          setIsSubmitted(false);
-        }
-
-        await loadChatMessages();
       }
-
-      setLoading(false);
-    } catch (err) {
-      console.error("Error loading game data:", err);
-      setLoading(false);
+    } else {
+      setOrders({});
+      setWinterActions([]);
+      setRetreatOrders({});
+      setIsSubmitted(false);
     }
-  }, [gameId, game?.id, loadChatMessages]);
+
+    await loadChatMessages();
+    setLoading(false);
+  } catch (err) {
+    console.error("Error loading game data:", err);
+    setLoading(false);
+  }
+}, [gameId, game?.id, loadChatMessages]);
+
 
   useEffect(() => {
     if (!units) return;
