@@ -25,11 +25,24 @@ export async function http(path, options = {}) {
     credentials: "include",
   });
 
+  // Always read the body once as text
+  const bodyText = await res.text().catch(() => "");
+
   if (!res.ok) {
     let msg;
-    try { msg = await res.json(); }
-    catch { msg = { error: await res.text() }; }
-    throw msg; // throw object like { error: "passcode_required" }
+    try {
+      msg = bodyText ? JSON.parse(bodyText) : {};
+    } catch {
+      msg = { error: bodyText || res.statusText || `HTTP ${res.status}` };
+    }
+    throw msg; // e.g. { error: "passcode_required" }
   }
-  return res.status === 204 ? null : res.json();
+
+  // Happy path: parse JSON if available, otherwise return null
+  if (!bodyText) return null;
+  try {
+    return JSON.parse(bodyText);
+  } catch {
+    return bodyText;
+  }
 }

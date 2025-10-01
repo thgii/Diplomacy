@@ -83,13 +83,16 @@ export default function GameBoard() {
   const autoAdvanceFiredRef = useRef(false);
 
   const urlParams = new URLSearchParams(window.location.search);
-  const gameId = urlParams.get('gameId');
-  const [isRefreshing, setIsRefreshing] = useState(false);
-
-
+  const gameId = urlParams.get("gameId");
+  // Prefer URL id; fallback to loaded game id
+  const effectiveId = useCallback(() => gameId || game?.id || null, [gameId, game?.id]);
+  // Primitive for dependency arrays
+  const [effectiveGameId, setEffectiveGameId] = useState(gameId || null);
   useEffect(() => {
-    const handleResize = () => {
-      setWindowWidth(window.innerWidth);
+    setEffectiveGameId(gameId || game?.id || null);
+  }, [gameId, game?.id]);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+innerWidth);
     };
     window.addEventListener('resize', handleResize);
     return () => {
@@ -97,16 +100,23 @@ export default function GameBoard() {
     };
   }, []);
 
-  const loadGameData = useCallback(async () => {
+  
+const loadGameData = useCallback(async () => {
     try {
       const currentUser = await User.me();
       setUser(currentUser);
-      
-      const gameData = await Game.filter({ id: gameId });
-      if (gameData.length > 0) {
-        const currentGame = gameData[0];
+
+      const idToLoad = gameId || game?.id || null;
+      if (!idToLoad) {
+        console.warn("No game id available (no ?gameId= and no game in state).");
+        setLoading(false);
+        return;
+      }
+
+      const currentGame = await Game.get(idToLoad);
+      if (currentGame) {
         console.log("loadGameData fetched game:", currentGame.current_phase, currentGame.current_turn);
-        
+
         if (currentGame.game_state?.supply_centers) {
           const updatedPlayers = currentGame.players.map(player => {
             const count = Object.values(currentGame.game_state.supply_centers).filter(owner => owner === player.country).length;
@@ -114,159 +124,60 @@ export default function GameBoard() {
           });
           currentGame.players = updatedPlayers;
         }
-        
+
         setGame(currentGame);
-        
+
         if (currentGame.game_state?.last_turn_results) {
           setLastTurnResults(currentGame.game_state.last_turn_results);
         } else {
           setLastTurnResults(null);
         }
-        
-        // Unconditionally reset orders to prevent state bleeding between phases
+
         setOrders({});
         setWinterActions([]);
         setRetreatOrders({});
         setIsSubmitted(false);
 
         let filter = {
-          game_id: gameId,
+          game_id: currentGame.id,
           player_email: currentUser.email,
           turn_number: currentGame.current_turn,
           phase: currentGame.current_phase,
         };
 
         if (currentGame.current_phase === 'retreat') {
-            // If the next phase is 'fall', the retreat came from 'spring'. If 'winter', it came from 'fall'.
-            const sourcePhase = currentGame.game_state?.phase_after_retreat === 'fall' ? 'spring' : 'fall';
-            filter.source_phase = sourcePhase;
+          const sourcePhase = currentGame.game_state?.phase_after_retreat === 'fall' ? 'spring' : 'fall';
+          filter.source_phase = sourcePhase;
         }
 
         const savedMoves = await GameMove.filter(filter);
 
         if (savedMoves.length > 0) {
           const move = savedMoves[0];
-          // Only load orders if they match the current exact phase and turn
-          if (currentGame.current_phase === 'winter' && move.phase === 'winter' && move.turn_number === currentGame.current_turn) {
-            setWinterActions(Array.isArray(move.orders) ? move.orders : []);
-            setIsSubmitted(move.submitted);
-          } else if (currentGame.current_phase === 'retreat' && move.phase === 'retreat' && move.turn_number === currentGame.current_turn) {
-            // Additional check: only load retreat orders if the retreats_required still exist
-            if (currentGame.game_state?.retreats_required?.length > 0) {
-              const loadedRetreatOrders = (Array.isArray(move.orders) ? move.orders : []).reduce((acc, o) => {
-                const uid = o?.unit_id ?? o?.unit?.id;
-                if (!uid) return acc; // skip truly malformed
-                acc[String(uid)] = { ...o, unit_id: String(uid) };
-                return acc;
-              }, {});
-              setRetreatOrders(loadedRetreatOrders);
-              setIsSubmitted(move.submitted);
-            }
-          } else if ((currentGame.current_phase === 'spring' || currentGame.current_phase === 'fall') && 
-                     move.phase === currentGame.current_phase && move.turn_number === currentGame.current_turn) {
-            const loadedOrders = (Array.isArray(move.orders) ? move.orders : []).reduce((acc, o) => {
-              const uidRaw = o?.unit_id ?? o?.unit?.id;
-              const uid = uidRaw ? stripTempSuffix(String(uidRaw)) : null;
-              if (!uid) return acc; // skip truly malformed
-              acc[uid] = { ...o, unit_id: uid };
-              return acc;
-            }, {});
-
-            setOrders(loadedOrders);
-            setIsSubmitted(move.submitted);
+          if (move && move.orders) {
+            setOrders(move.orders || {});
+            setWinterActions(move.winter_actions || []);
+            setRetreatOrders(move.retreat_orders || {});
+          } else {
+            setOrders({});
+            setWinterActions([]);
+            setRetreatOrders({});
           }
-        }
-
-        if (!Array.isArray(currentGame.game_state?.units) || currentGame.game_state.units.length === 0) {
-          const initialGameUnits = [];
-          const ids = new Set(); // collect used ids to avoid collisions
-
-          currentGame.players.forEach((p) => {
-            if (initialUnits[p.country]) {
-              initialUnits[p.country].forEach((unit) => {
-                const country = p.country;
-                const origin = unit.territory; // starting/home
-                const type = unit.type;
-                const id = makeUnitId(country, origin, type, ids);
-                ids.add(id);
-
-                initialGameUnits.push({
-                  ...unit,
-                  id,
-                  country,
-                  home: origin,
-                  origin: origin,
-                });
-              });
-            }
-          });
-
-          setUnits(initialGameUnits);
         } else {
-          // sanitize for duplicates just in case
-          const sanitized = ensureUniqueUnitIds(currentGame.game_state.units);
-          setUnits(sanitized);
+          setOrders({});
+          setWinterActions([]);
+          setRetreatOrders({});
         }
 
-      } else {
-          // If game data not found, clear all related states
-          setOrders({});
-          setRetreatOrders({});
-          setWinterActions([]);
-          setIsSubmitted(false);
-          setLastTurnResults(null);
+        await loadChatMessages();
       }
-    } catch (error) {
-      console.error("Error loading game data:", error);
-    } finally {
+
+      setLoading(false);
+    } catch (err) {
+      console.error("Error loading game data:", err);
       setLoading(false);
     }
-  }, [gameId]);
-
-  const loadChatMessages = useCallback(async () => {
-    try {
-      const messages = await ChatMessage.filter({ game_id: gameId }, "created_date"); // Sort chronologically
-      setChatMessages(messages);
-      
-      const lastReadTimestamp = localStorage.getItem(`lastRead_${gameId}`);
-      if (messages.length > 0) {
-        // Check against the latest message (last in chronologically sorted array)
-        if (!lastReadTimestamp || new Date(messages[messages.length - 1].created_date) > new Date(lastReadTimestamp)) {
-          setHasUnreadMessages(true);
-        }
-      }
-
-    } catch (error) {
-      console.error("Error loading chat messages:", error);
-    }
-  }, [gameId]);
-  
-  const onReload = useCallback(async () => {
-    try {
-      setIsRefreshing(true);
-      // Reuse your existing loaders
-      await Promise.all([loadGameData(), loadChatMessages()]);
-    } finally {
-      setIsRefreshing(false);
-    }
-  }, [loadGameData, loadChatMessages]);
-
-  useEffect(() => {
-    loadGameData();
-    loadChatMessages();
-  }, [gameId, loadGameData, loadChatMessages]);
-
-// Keep local units in sync with backend seed/start writes
-useEffect(() => {
-  if (!game) return;
-  const seeded = game?.game_state?.units;
-  if (Array.isArray(seeded) && seeded.length > 0) {
-    // ensureUniqueUnitIds already exists in this file
-    setUnits(ensureUniqueUnitIds(seeded));
-  }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-}, [game?.id, game?.current_phase, game?.game_state?.units, game?.game_state?.units?.length]);
-
+  }, [gameId, game?.id, loadChatMessages]);
 useEffect(() => {
   if (!units) return;
   // eslint-disable-next-line no-console
@@ -364,7 +275,7 @@ const handleSetRetreatOrder = (unitId, order) => {
 
       if (game.current_phase === "spring" || game.current_phase === "fall") {
         const allMoves = await GameMove.filter({
-          game_id: gameId,
+          game_id: effectiveId(),
           turn_number: game.current_turn,
           phase: game.current_phase
         });
@@ -456,7 +367,7 @@ const handleSetRetreatOrder = (unitId, order) => {
             game.retreat_length_hours ?? Math.max(1, Math.floor(turnLengthHours / 2)); // e.g., 6h if 24h turns
           retreatDeadline.setHours(retreatDeadline.getHours() + retreatLengthHours);
 
-          await Game.update(gameId, {
+          await Game.update(effectiveId(), {
             current_phase: 'retreat',
             phase_deadline: retreatDeadline.toISOString(),
             game_state: newGameState,
@@ -504,7 +415,7 @@ const handleSetRetreatOrder = (unitId, order) => {
 
             const winner = newPlayers.find(p => p.supply_centers >= 18);
             if (winner) {
-                await Game.update(gameId, {
+                await Game.update(effectiveId(), {
                     status: "completed",
                     winner_email: winner.email,
                     winner_country: winner.country,
@@ -533,7 +444,7 @@ const handleSetRetreatOrder = (unitId, order) => {
       } else if (game.current_phase === 'retreat') {
           const sourcePhase = game.game_state?.phase_after_retreat === 'fall' ? 'spring' : 'fall';
           const retreatMoves = await GameMove.filter({
-            game_id: gameId,
+            game_id: effectiveId(),
             turn_number: game.current_turn,
             phase: 'retreat',
             source_phase: sourcePhase, // Filter by source_phase
@@ -659,7 +570,7 @@ const handleSetRetreatOrder = (unitId, order) => {
 
               const winner = newPlayers.find(p => p.supply_centers >= 18);
               if (winner) {
-                  await Game.update(gameId, {
+                  await Game.update(effectiveId(), {
                       status: "completed",
                       winner_email: winner.email,
                       winner_country: winner.country,
@@ -691,7 +602,7 @@ const handleSetRetreatOrder = (unitId, order) => {
           }
       } else if (game.current_phase === "winter") {
         const winterMoves = await GameMove.filter({
-          game_id: gameId,
+          game_id: effectiveId(),
           turn_number: game.current_turn,
           phase: 'winter',
         });
@@ -740,7 +651,7 @@ const handleSetRetreatOrder = (unitId, order) => {
       
       console.log("Before Game.update - Current Phase:", game.current_phase, "Next Phase:", nextPhaseForUpdate, "Next Turn:", nextTurn);
       
-      await Game.update(gameId, {
+      await Game.update(effectiveId(), {
         current_phase: nextPhaseForUpdate,
         current_turn: nextTurn,
         phase_deadline: deadline.toISOString(),
@@ -759,7 +670,7 @@ const handleSetRetreatOrder = (unitId, order) => {
     } finally {
         setIsResolving(false);
     }
-  }, [game, gameId, units, loadGameData]);
+  }, [game, effectiveGameId, units, loadGameData]);
 
   const checkAndAdvancePhase = useCallback(async (forceAdvance = false) => {
     try {
@@ -769,7 +680,7 @@ const handleSetRetreatOrder = (unitId, order) => {
       }
       
       const filterOptions = {
-        game_id: gameId,
+        game_id: effectiveId(),
         turn_number: game.current_turn,
         phase: game.current_phase,
         submitted: true
@@ -831,7 +742,7 @@ const handleSetRetreatOrder = (unitId, order) => {
     } catch (error) {
       console.error("Error checking phase advancement:", error);
     }
-  }, [game, gameId, advancePhase, units]);
+  }, [game, effectiveGameId, advancePhase, units]);
 
   // ✅ Reset the guard each time the deadline changes
   useEffect(() => {
@@ -855,7 +766,7 @@ const handleSetRetreatOrder = (unitId, order) => {
         alert("You are not a player in this game.");
         return;
       }
-      if (!gameId) {
+      if (!effectiveId()) {
         alert("Cannot save orders: Game ID is missing.");
         return;
       }
@@ -937,7 +848,7 @@ const handleSetRetreatOrder = (unitId, order) => {
       }
 
       let filter = {
-        game_id: gameId,
+        game_id: effectiveId(),
         player_email: user.email,
         turn_number: game.current_turn,
         phase: game.current_phase,
@@ -960,7 +871,7 @@ const handleSetRetreatOrder = (unitId, order) => {
         await GameMove.update(existingMoves[0].id, moveData);
       } else {
         await GameMove.create({
-          game_id: gameId,
+          game_id: effectiveId(),
           player_email: user.email,
           country: userPlayer.country,
           turn_number: game.current_turn,
@@ -996,7 +907,7 @@ const handleSetRetreatOrder = (unitId, order) => {
       }
 
       const filterOptions = {
-        game_id: gameId,
+        game_id: effectiveId(),
         player_email: user.email,
         turn_number: game.current_turn,
         phase: game.current_phase
@@ -1034,7 +945,7 @@ const handleSetRetreatOrder = (unitId, order) => {
       const userCountry = game.players?.find(p => p.email === user.email)?.country;
       
       await ChatMessage.create({
-        game_id: gameId,
+        game_id: effectiveId(),
         thread_id: threadId,
         thread_participants: participants,
         sender_email: user.email,
@@ -1063,7 +974,7 @@ const handleSetRetreatOrder = (unitId, order) => {
 
       setGame(prev => ({ ...prev, draw_votes: newVotes }));
       
-      await Game.update(gameId, { draw_votes: newVotes });
+      await Game.update(effectiveId(), { draw_votes: newVotes });
 
       // Determine active players: non-dummy players who still have units
       const activePlayerEmails = (game.players || [])
@@ -1073,7 +984,7 @@ const handleSetRetreatOrder = (unitId, order) => {
       const allActiveVoted = activePlayerEmails.length > 0 && activePlayerEmails.every(email => newVotes.includes(email));
 
       if (allActiveVoted) {
-        await Game.update(gameId, {
+        await Game.update(effectiveId(), {
           status: 'completed',
           winners: activePlayerEmails // For a draw, 'winners' will be an array of emails
         });
@@ -1092,9 +1003,9 @@ const handleSetRetreatOrder = (unitId, order) => {
     setHasUnreadMessages(false);
     // Use the timestamp of the latest message to ensure accuracy (last in chronologically sorted array)
     if (chatMessages.length > 0) {
-      localStorage.setItem(`lastRead_${gameId}`, chatMessages[chatMessages.length - 1].created_date);
+      localStorage.setItem(`lastRead_${effectiveId()}`, chatMessages[chatMessages.length - 1].created_date);
     } else {
-      localStorage.setItem(`lastRead_${gameId}`, new Date().toISOString());
+      localStorage.setItem(`lastRead_${effectiveId()}`, new Date().toISOString());
     }
   };
 

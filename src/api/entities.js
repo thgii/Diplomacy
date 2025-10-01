@@ -77,7 +77,13 @@ export const Game = {
     return http(`/games/${id}`, { method: "DELETE" });
   },
 
+  // FIX A1: If caller provides an id (or game_id), fetch that single game and return [game]
   async filter(q = {}) {
+    const id = q?.id ?? q?.game_id;
+    if (id) {
+      const one = await http(`/games/${id}`);
+      return one ? [one] : [];
+    }
     const qs = new URLSearchParams(q).toString();
     return http(`/games${qs ? `?${qs}` : ""}`);
   },
