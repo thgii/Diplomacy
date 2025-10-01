@@ -15,7 +15,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import { getCountryColor, allPowers, initialUnits, getInitialSupplyCenters } from "../components/game/mapData";
 import CreateGameDialog from "../components/lobby/CreateGameDialog";
 import GameCard from "../components/lobby/GameCard";
-import { territories, initialUnits, homeSupplyCenters } from "../components/game/mapData";
+import { territories, homeSupplyCenters } from "../components/game/mapData";
 
 export default function GameLobby() {
   const [games, setGames] = useState([]);
@@ -228,7 +228,7 @@ export default function GameLobby() {
 
         const makeId = (country, territory, type) => {
           // Keep it simple but collision-safe
-          const base = `      ${String(country).toUpperCase()}-${String(territory).toUpperCase()}-${String(type).toUpperCase()}`;
+          const base = `${String(country).toUpperCase()}-${String(territory).toUpperCase()}-${String(type).toUpperCase()}`;
           if (!usedIds.has(base)) {
             usedIds.add(base);
             return base;
