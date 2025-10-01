@@ -13,7 +13,7 @@ export async function onRequestPost({ request, env }) {
   // Reuse existing session if present
   if (cookies.player_id) {
     const { results } = await env.DB
-      .prepare("SELECT id, email, full_name, nickname, passcode_hash, created_at FROM players WHERE id = ?")
+      .prepare("SELECT id, email, full_name, nickname, passcode_hash, role, created_at FROM players WHERE id = ?")
       .bind(cookies.player_id)
       .all();
     const row = results?.[0];
@@ -24,7 +24,7 @@ export async function onRequestPost({ request, env }) {
 
   // Find by nickname
   const found = await env.DB
-    .prepare("SELECT id, email, full_name, nickname, passcode_hash, created_at FROM players WHERE nickname = ?")
+    .prepare("SELECT id, email, full_name, nickname, passcode_hash, role, created_at FROM players WHERE nickname = ?")
     .bind(nickname)
     .all();
 
@@ -52,8 +52,8 @@ export async function onRequestPost({ request, env }) {
   const full_name = nickname;
 
   await env.DB.prepare(
-    `INSERT INTO players (id, email, full_name, nickname, passcode_hash, created_at)
-     VALUES (?, ?, ?, ?, ?, datetime('now'))`
+    `INSERT INTO players (id, email, full_name, nickname, passcode_hash, role, created_at)
+     VALUES (?, ?, ?, ?, ?, 'player', datetime('now'))`
   ).bind(id, email, full_name, nickname, passcode_hash).run();
 
   const created = { id, email, full_name, nickname, created_at: new Date().toISOString() };
@@ -68,7 +68,7 @@ export async function onRequestGet({ request, env }) {
   if (!cookies.player_id) return json({ player: null });
 
   const { results } = await env.DB
-    .prepare("SELECT id, email, full_name, nickname, passcode_hash, created_at FROM players WHERE id = ?")
+    .prepare("SELECT id, email, full_name, nickname, passcode_hash, role, created_at FROM players WHERE id = ?")
     .bind(cookies.player_id)
     .all();
 
@@ -94,6 +94,7 @@ async function ensurePlayersTable(env) {
       full_name TEXT,
       nickname TEXT UNIQUE,
       passcode_hash TEXT,
+      role TEXT DEFAULT 'player',
       created_at TEXT DEFAULT (datetime('now'))
     )`
   ).run();
