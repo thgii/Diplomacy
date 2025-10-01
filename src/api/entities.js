@@ -4,6 +4,7 @@ import { http as httpRequest, getPlayer, setPlayer } from "./http";
 /* ========================= User ========================= */
 export const User = {
   async me() {
+    // Prefer server session (cookie); fall back to local cache
     try {
       const res = await httpRequest("/session", { method: "GET" });
       if (res && res.id) {
@@ -11,7 +12,8 @@ export const User = {
         return res;
       }
     } catch {
-      setPlayer(null); // clear stale local if cookie/session invalid
+      // If the cookie is invalid now, ensure we don't keep a stale local player
+      setPlayer(null);
     }
     return getPlayer();
   },
@@ -21,13 +23,11 @@ export const User = {
     if (passcode) payload.passcode = passcode;
 
     try {
-      const session = await httpRequest("/session", {
-        method: "POST",
-        body: payload, // auto-stringified by http()
-      });
+      const session = await httpRequest("/session", { method: "POST", body: payload });
       setPlayer(session);
       return session;
     } catch (e) {
+      // Normalize for UI: passcode_required / invalid_credentials, etc.
       let msg = "Sign-in failed.";
       if (e?.status === 401) {
         const apiErr = e?.body?.error || e?.body?.message || "Unauthorized";
@@ -68,6 +68,7 @@ export const Game = {
   },
 
   async create(data) {
+    // Normalize field names from your form -> API expects snake_case
     const payload = {
       name: data?.name ?? data?.title ?? "New Game",
       max_players: toNum(data?.max_players ?? data?.maxPlayers, 7),
@@ -109,6 +110,7 @@ export const Game = {
 /* ========================= GameMove ========================= */
 export const GameMove = {
   async filter(q) {
+    // q: { game_id, turn_number?, phase?, submitted?, source_phase?, player_email? ... }
     const { game_id, ...rest } = q || {};
     if (!game_id) throw new Error("GameMove.filter: missing game_id");
     const qs = new URLSearchParams(rest).toString();
@@ -116,6 +118,7 @@ export const GameMove = {
   },
 
   async create(data) {
+    // data: { game_id, player_email, country, turn_number, phase, orders, submitted, source_phase? }
     const { game_id, ...payload } = data || {};
     if (!game_id) throw new Error("GameMove.create: missing game_id");
     return httpRequest(`/games/${encodeURIComponent(game_id)}/moves`, {
@@ -147,6 +150,7 @@ export const ChatMessage = {
   },
 
   async create(data) {
+    // data: { game_id, thread_id?, thread_participants?, sender_email, sender_country, message }
     const { game_id, ...payload } = data || {};
     if (!game_id) throw new Error("ChatMessage.create: missing game_id");
     return httpRequest(`/games/${encodeURIComponent(game_id)}/chat`, {
