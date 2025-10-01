@@ -12,7 +12,7 @@ import { Plus, Users, Clock, Crown, Play, Eye } from "lucide-react";
 import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "@/utils";
 import { motion, AnimatePresence } from "framer-motion";
-import { getCountryColor, allPowers } from "../components/game/mapData";
+import { getCountryColor, allPowers, initialUnits, getInitialSupplyCenters } from "../components/game/mapData";
 import CreateGameDialog from "../components/lobby/CreateGameDialog";
 import GameCard from "../components/lobby/GameCard";
 import { territories, initialUnits, homeSupplyCenters } from "../components/game/mapData";
@@ -216,10 +216,61 @@ export default function GameLobby() {
       };
 
       if (fillsTable) {
+        // 1) Set the first deadline
         const h = game.turn_length_hours ?? 24;
         const d = new Date();
         d.setHours(d.getHours() + h);
         patch.phase_deadline = d.toISOString();
+
+        // 2) Build starting units for each seated player
+        const startingUnits = [];
+        const usedIds = new Set();
+
+        const makeId = (country, territory, type) => {
+          // Keep it simple but collision-safe
+          const base = `      ${String(country).toUpperCase()}-${String(territory).toUpperCase()}-${String(type).toUpperCase()}`;
+          if (!usedIds.has(base)) {
+            usedIds.add(base);
+            return base;
+          }
+          let i = 2;
+          let candidate = `${base}#${i}`;
+          while (usedIds.has(candidate)) {
+            i += 1;
+            candidate = `${base}#${i}`;
+          }
+          usedIds.add(candidate);
+          return candidate;
+        };
+
+        updatedPlayers.forEach((p) => {
+          const starts = initialUnits[p.country] || [];
+          starts.forEach((u) => {
+            const id = makeId(p.country, u.territory, u.type);
+            startingUnits.push({
+              id,
+              type: u.type,
+              territory: u.territory,
+              country: p.country,
+              home: u.territory,
+              origin: u.territory,
+            });
+          });
+        });
+      
+        // 3) Initial supply center ownership (from map data’s initial_owner)
+        const initialSC = getInitialSupplyCenters();
+      
+        // 4) Seed game state & the phase/turn
+        patch.current_turn = 1;
+        patch.current_phase = "spring";
+        patch.game_state = {
+          ...(game.game_state || {}),
+          units: startingUnits,
+          supply_centers: initialSC,
+          last_turn_results: null,
+          pending_retreats: [],
+        };
       }
 
       await Game.update(game.id, patch);
