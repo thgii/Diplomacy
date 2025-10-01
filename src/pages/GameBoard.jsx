@@ -256,6 +256,24 @@ export default function GameBoard() {
     loadChatMessages();
   }, [gameId, loadGameData, loadChatMessages]);
 
+// Keep local units in sync with backend seed/start writes
+useEffect(() => {
+  if (!game) return;
+  const seeded = game?.game_state?.units;
+  if (Array.isArray(seeded) && seeded.length > 0) {
+    // ensureUniqueUnitIds already exists in this file
+    setUnits(ensureUniqueUnitIds(seeded));
+  }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+}, [game?.id, game?.current_phase, game?.game_state?.units, game?.game_state?.units?.length]);
+
+useEffect(() => {
+  if (!units) return;
+  // eslint-disable-next-line no-console
+  console.log("Render units:", { count: units.length, sample: units.slice(0,3) });
+}, [units]);
+
+
   const handleSetOrder = (unitId, order) => {
     const stripTempSuffix = (id) =>
       typeof id === "string" ? id.replace(/-\d{13,}$/, "") : id;
