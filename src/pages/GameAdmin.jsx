@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useCallback } from "react";
 import { Game } from "@/api/entities";
 import { User } from "@/api/entities"; // Corrected import based on outline
@@ -8,7 +7,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { getCountryColor, allPowers } from "../components/game/mapData";
+import { getCountryColor, allPowers, initialUnits } from "../components/game/mapData"; // ⬅️ add initialUnits
 import {
   Select,
   SelectContent,
@@ -49,6 +48,83 @@ const COUNTRY_COLORS = {
   "Russia": "#d1d5db", // light gray
   "Turkey": "#eab308" // yellow
 };
+
+/* -------------------------- Helpers for 2A / 2B -------------------------- */
+
+// Fisher–Yates shuffle
+function shuffle(arr) {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+// Assign any players missing a country if random_assignment is true
+function assignMissingCountries(players, randomAssignment) {
+  const assigned = new Set(players.map(p => p.country).filter(Boolean));
+  const pool = allPowers.filter(c => !assigned.has(c));
+  const shuffled = shuffle(pool);
+  let idx = 0;
+
+  const nextPlayers = players.map(p => {
+    if (p.country || !randomAssignment) return p;
+    const country = shuffled[idx++] || null;
+    if (!country) return p; // ran out of countries
+    return {
+      ...p,
+      country,
+      color: getCountryColor(country),
+      // keep their supply_centers or default to 3
+      supply_centers: typeof p.supply_centers === "number" ? p.supply_centers : 3,
+    };
+  });
+
+  return nextPlayers;
+}
+
+// Build unique unit IDs to avoid collisions
+function makeUnitIdFactory(existingUnits = []) {
+  const used = new Set((existingUnits || []).map(u => u.id));
+  return (country, territory, type) => {
+    const base = `${country}-${territory}-${type}`.toUpperCase();
+    if (!used.has(base)) {
+      used.add(base);
+      return base;
+    }
+    let n = 2;
+    while (used.has(`${base}-${n}`)) n++;
+    const id = `${base}-${n}`;
+    used.add(id);
+    return id;
+  };
+}
+
+// Seed starting units for all players with a country
+function seedStartingUnits(players, currentUnits = []) {
+  const makeId = makeUnitIdFactory(currentUnits);
+  const starting = [];
+
+  players.forEach(p => {
+    if (!p.country) return;
+    const starts = initialUnits[p.country] || [];
+    starts.forEach(u => {
+      starting.push({
+        id: makeId(p.country, u.territory, u.type),
+        country: p.country,
+        type: u.type,
+        territory: u.territory,
+        home: u.territory,
+        origin: u.territory,
+      });
+    });
+  });
+
+  return starting;
+}
+
+/* ----------------------------------------------------------------------- */
 
 export default function GameAdmin() {
   const [game, setGame] = useState(null);
@@ -100,12 +176,7 @@ export default function GameAdmin() {
       const fillsTable = updatedPlayers.length === game.max_players;
 
       if (fillsTable) {
-        const powers = [...allPowers];
-        for (let i = powers.length - 1; i > 0; i--) {
-          const j = Math.floor(Math.random() * (i + 1));
-          [powers[i], powers[j]] = [powers[j], powers[i]];
-        }
-
+        const powers = shuffle(allPowers);
         const assignedPlayers = updatedPlayers.map((p, i) => ({
           ...p,
           country: powers[i],
@@ -163,7 +234,6 @@ export default function GameAdmin() {
       let newUnits = [...(game.game_state?.units || [])];
 
       // Process move orders (simplified resolution for now)
-      // This is a basic example; a full Diplomacy engine would be much more complex.
       allMoves.forEach(move => {
         move.orders.forEach(order => {
           if (order.action === 'move') {
@@ -226,8 +296,10 @@ export default function GameAdmin() {
   const updateGameSettings = async (updates) => {
     try {
       let next = { ...updates };
+      let nextPlayers = game.players ? [...game.players] : [];
+      let nextGameState = { ...(game.game_state || {}) };
 
-      // If host sets status -> in_progress and it wasn't already, start the clock
+      // 2A: When switching to in_progress, start the clock
       if (next.status === "in_progress" && game.status !== "in_progress") {
         const h = (typeof next.turn_length_hours === "number"
           ? next.turn_length_hours
@@ -235,15 +307,47 @@ export default function GameAdmin() {
         const d = new Date();
         d.setHours(d.getHours() + h);
         next.phase_deadline = d.toISOString();
+
+        // 2B: Force-assign any players with no country if random_assignment is true
+        const randomAssignment = !!game.random_assignment;
+        nextPlayers = assignMissingCountries(nextPlayers, randomAssignment);
+
+        // 2A: Seed starting units if none exist yet
+        const hasUnits = Array.isArray(nextGameState.units) && nextGameState.units.length > 0;
+        if (!hasUnits) {
+          const seeded = seedStartingUnits(nextPlayers, nextGameState.units);
+          nextGameState = {
+            ...nextGameState,
+            units: seeded,
+            // keep any existing mappings; otherwise leave as is (index.js already wrote defaults)
+            supply_centers: (nextGameState.supply_centers && typeof nextGameState.supply_centers === "object")
+              ? nextGameState.supply_centers
+              : {},
+            last_turn_results: nextGameState.last_turn_results ?? null,
+            pending_retreats: Array.isArray(nextGameState.pending_retreats) ? nextGameState.pending_retreats : [],
+          };
+          next.game_state = nextGameState;
+        }
+
+        // Persist possibly updated players (due to assignment)
+        next.players = nextPlayers;
       }
 
-      // If host sets status back to waiting, clear the clock
+      // If host sets status back to waiting, clear the clock (no unit changes)
       if (next.status === "waiting") {
         next.phase_deadline = null;
       }
 
+      // Persist
       await Game.update(game.id, next);
-      setGame({ ...game, ...next });
+
+      // Update local state mirror
+      setGame({
+        ...game,
+        ...next,
+        players: next.players ?? game.players,
+        game_state: next.game_state ? next.game_state : game.game_state,
+      });
     } catch (error) {
       console.error("Error updating game settings:", error);
     }
