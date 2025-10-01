@@ -102,9 +102,8 @@ export default function GameBoard() {
       const currentUser = await User.me();
       setUser(currentUser);
       
-      const gameData = await Game.filter({ id: gameId });
-      if (gameData.length > 0) {
-        const currentGame = gameData[0];
+      const currentGame = await Game.get(gameId);
+      if (currentGame) {
         console.log("loadGameData fetched game:", currentGame.current_phase, currentGame.current_turn);
         
         if (currentGame.game_state?.supply_centers) {
