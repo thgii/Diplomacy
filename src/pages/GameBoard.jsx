@@ -129,8 +129,19 @@ export default function GameBoard() {
       const gid = effectiveId();
       if (!gid) return;
       const msgs = await ChatMessage.filter({ game_id: gid });
-      const sorted = [...(msgs || [])].sort((a, b) => new Date(a.created_date) - new Date(b.created_date));
-      setChatMessages(sorted);
+const ts = (m) => {
+  const v = m.created_date ?? m.created_at ?? m.createdAt ?? m.timestamp ?? m.time ?? m.sentAt;
+  if (v == null) return 0;
+  if (typeof v === "number") return v > 1e12 ? v : v * 1000;
+  const asDate = new Date(v);
+  if (!Number.isNaN(asDate.getTime())) return asDate.getTime();
+  const asNum = Number(v);
+  if (Number.isFinite(asNum)) return asNum > 1e12 ? asNum : asNum * 1000;
+  return 0;
+};
+const sorted = [...(msgs || [])].sort((a, b) => ts(a) - ts(b));
+setChatMessages(sorted);
+
 
       const lastReadKey = `lastRead_${gid}`;
       const lastRead = typeof window !== "undefined" ? localStorage.getItem(lastReadKey) : null;
@@ -154,10 +165,13 @@ export default function GameBoard() {
     setHasUnreadMessages(false);
     const gid = effectiveId();
     if (!gid) return;
-    const newest = chatMessages[chatMessages.length - 1]?.created_date || new Date().toISOString();
-    try {
-      localStorage.setItem(`lastRead_${gid}`, newest);
-    } catch {}
+    const lastMsg = chatMessages[chatMessages.length - 1];
+const newestRaw = lastMsg?.created_date ?? lastMsg?.created_at ?? lastMsg?.createdAt ?? lastMsg?.timestamp ?? lastMsg?.time ?? lastMsg?.sentAt;
+const newest = newestRaw ?? new Date().toISOString();
+try {
+  localStorage.setItem(`lastRead_${gid}`, newest);
+} catch {}
+
   };
 
   /* ------------------------------- data load ------------------------------- */

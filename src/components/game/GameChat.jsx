@@ -13,37 +13,56 @@ import { motion, AnimatePresence } from "framer-motion";
 import CreateThreadDialog from "./CreateThreadDialog";
 
 const countryAbbrevs = {
-  England: "E",
-  France: "F",
-  Germany: "G",
-  Italy: "I",
-  Austria: "A",
-  Russia: "R",
-  Turkey: "T",
+  England: "Eng",
+  France: "Fra",
+  Germany: "Ger",
+  Italy: "Ita",
+  Austria: "Aus",
+  Russia: "Rus",
+  Turkey: "Tur",
 };
 
 
-const formatMountainTime = (dateString) => {
-  const date = new Date(dateString);
-  // 'America/Denver' is the standard IANA time zone name for Mountain Time (MST/MDT)
-  const formatter = new Intl.DateTimeFormat('en-US', {
-    timeZone: 'America/Denver',
-    month: 'short',
-    day: 'numeric',
-    hour: '2-digit',
-    minute: '2-digit',
-    hour12: false, // Use 24-hour format
-  });
+// Robust MT time formatter that accepts ISO strings OR epoch seconds/ms
+const formatMountainTime = (value) => {
+  if (value == null) return "";
+  // normalize to Date
+  let d = null;
 
-  // Rebuild the string to match the desired "MMM d, HH:mm" format
-  const parts = formatter.formatToParts(date);
-  const findPart = (type) => parts.find(p => p.type === type)?.value;
-  
-  const month = findPart('month');
-  const day = findPart('day');
-  const hour = findPart('hour');
-  const minute = findPart('minute');
+  if (typeof value === "number") {
+    // seconds vs ms
+    const ms = value > 1e12 ? value : value * 1000;
+    d = new Date(ms);
+  } else {
+    // try as ISO string
+    const parsed = new Date(value);
+    if (!Number.isNaN(parsed.getTime())) d = parsed;
+    else {
+      // sometimes servers return numeric-like strings
+      const asNum = Number(value);
+      if (Number.isFinite(asNum)) {
+        const ms = asNum > 1e12 ? asNum : asNum * 1000;
+        d = new Date(ms);
+      }
+    }
+  }
 
+  if (!d || Number.isNaN(d.getTime())) return "";
+
+  const parts = new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/Denver",
+    month: "short",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+    hour12: false,
+  }).formatToParts(d);
+
+  const get = (t) => parts.find((p) => p.type === t)?.value;
+  const month = get("month");
+  const day = get("day");
+  const hour = get("hour");
+  const minute = get("minute");
   return `${month} ${day}, ${hour}:${minute}`;
 };
 
@@ -379,7 +398,7 @@ export default function GameChat({ game, user, messages, onSendMessage, onClose 
                           <div className={`text-xs mt-2 ${
                             isOwnMessage ? 'text-blue-100' : 'text-slate-400'
                           }`}>
-                            {formatMountainTime(message.created_date)}
+                            {formatMountainTime(getTimestamp(message))}
                           </div>
                         </div>
                       </div>
