@@ -736,10 +736,11 @@ export default function DiplomacyMap({
           />
 
           <div
-            className="absolute inset-0 w-full h-full transition-transform duration-100 ease-out will-change-transform"
+            className="absolute inset-0 w-full h-full transition-transform duration-100 ease-out will-change-transform z-10"
             style={{
               transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoom})`,
               transformOrigin: "0 0",
+              position: "absolute",
             }}
           >
             <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
