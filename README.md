@@ -1,8 +1,7 @@
-# Base44 App
+# Diplomacy
 
 
-This app was created automatically by Base44.
-It's a Vite+React app that communicates with the Base44 API.
+This is a Vite+React app hosted on Cloudflare.
 
 ## Running the app
 
@@ -17,4 +16,3 @@ npm run dev
 npm run build
 ```
 
-For more information and support, please contact Base44 support at app@base44.com.
