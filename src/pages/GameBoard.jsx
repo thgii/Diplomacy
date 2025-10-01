@@ -17,15 +17,22 @@ import PhaseTimer from "../components/game/PhaseTimer";
 import { adjudicate } from "../components/game/Adjudicator";
 import { territories, initialUnits } from "../components/game/mapData";
 
-// Strip client temp suffixes like "-1758730630474"
-const stripTempSuffix = (id) =>
-  typeof id === "string" ? id.replace(/-\d{13,}$/, "") : id;
+/* ---------------------------- small helpers ---------------------------- */
 
-// Canonicalize a territory id to its base province (e.g., "SPA/sc" -> "SPA")
-const baseProv = (t) =>
-  typeof t === "string" && t.includes("/") ? t.split("/")[0] : t;
+// strip client temp suffixes like "-1758730630474"
+const stripTempSuffix = (id) => (typeof id === "string" ? id.replace(/-\d{13,}$/, "") : id);
+// normalize province casing (e.g., "spa/SC" -> "SPA/sc")
+const normProv = (s) => {
+  if (typeof s !== "string") return s;
+  const t = s.trim();
+  if (!t) return t;
+  const [base, coast] = t.split("/");
+  return coast ? `${base.toUpperCase()}/${coast.toLowerCase()}` : base.toUpperCase();
+};
+// base territory without split-coast suffix
+const baseProv = (t) => (typeof t === "string" && t.includes("/") ? t.split("/")[0] : t);
 
-// Make a stable, globally-unique unit id. Uses a readable base + counter if needed.
+// create a readable, unique unit id (stable even with duplicates)
 const makeUnitId = (country, originTerritory, type, existingIds = new Set()) => {
   const base = `${String(country).toUpperCase()}-${String(originTerritory).toUpperCase()}-${String(type).toUpperCase()}`;
   if (!existingIds.has(base)) return base;
@@ -38,7 +45,6 @@ const makeUnitId = (country, originTerritory, type, existingIds = new Set()) => 
   return candidate;
 };
 
-// Ensure a units[] array has unique ids; fix dupes deterministically.
 const ensureUniqueUnitIds = (units) => {
   const seen = new Set();
   return (units || []).map((u) => {
@@ -46,205 +52,214 @@ const ensureUniqueUnitIds = (units) => {
     const origin = u.home ?? u.origin ?? u.start ?? u.start_territory ?? u.original_territory ?? u.territory ?? "UNK";
     const type = u.type ?? u.unit_type ?? "ARMY";
     let id = (u.id ? String(u.id) : `${country}-${origin}-${type}`).toUpperCase();
-    if (seen.has(id)) {
-      id = makeUnitId(country, origin, type, seen);
-    }
+    if (seen.has(id)) id = makeUnitId(country, origin, type, seen);
     seen.add(id);
     return { ...u, id };
   });
 };
 
+/* ------------------------------- component ------------------------------ */
+
 export default function GameBoard() {
   const [game, setGame] = useState(null);
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  const [showChat, setShowChat] = useState(false);
+
+  const [units, setUnits] = useState([]);
+  const [orders, setOrders] = useState({});
+  const [retreatOrders, setRetreatOrders] = useState({});
+  const [winterActions, setWinterActions] = useState([]);
+  const [isSubmitted, setIsSubmitted] = useState(false);
+  const [isSavingOrders, setIsSavingOrders] = useState(false);
+
   const [showPlayerPanel, setShowPlayerPanel] = useState(false);
+  const [showChat, setShowChat] = useState(false);
   const [chatMessages, setChatMessages] = useState([]);
   const [hasUnreadMessages, setHasUnreadMessages] = useState(false);
-  const [orders, setOrders] = useState({});
-  const [units, setUnits] = useState([]);
-  const [isSubmitted, setIsSubmitted] = useState(false);
-  const [windowWidth, setWindowWidth] = useState(typeof window !== "undefined" ? window.innerWidth : 1024);
-  const [isResolving, setIsResolving] = useState(false);
-  const [winterActions, setWinterActions] = useState([]);
+
   const [showLastTurnResults, setShowLastTurnResults] = useState(false);
   const [lastTurnResults, setLastTurnResults] = useState(null);
-  const [retreatOrders, setRetreatOrders] = useState({});
-  const [showVictoryOverlay, setShowVictoryOverlay] = useState(true);
-  const [isSavingOrders, setIsSavingOrders] = useState(false);
+
+  const [isResolving, setIsResolving] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [windowWidth, setWindowWidth] = useState(typeof window !== "undefined" ? window.innerWidth : 1024);
+
   const autoAdvanceFiredRef = useRef(false);
 
-  // --------- Effective game id (URL first, else loaded game) ----------
-// --------- Effective game id (URL first, then path, then last-viewed, then loaded game) ----------
-const url = typeof window !== "undefined" ? new URL(window.location.href) : null;
-const qsId = url ? url.searchParams.get("gameId") : null;
-// Support routes like /game/123 or /games/123
-const pathId = typeof window !== "undefined"
-  ? (window.location.pathname.match(/\/games?\/([^/?#]+)/)?.[1] || null)
-  : null;
-// Remember the last opened game so reloads without a query still work
-const storedId = typeof window !== "undefined" ? localStorage.getItem("lastViewedGameId") : null;
+  /* -------- effective id wiring: query param -> state -> fallback to game.id -------- */
 
-// ...
-const [effectiveGameId, setEffectiveGameId] = useState(qsId || pathId || storedId || null);
-const effectiveId = useCallback(
-  () => (qsId || pathId || storedId || game?.id || null),
-  [qsId, pathId, storedId, game?.id]
-);
+  // raw query param (do NOT use elsewhere directly)
+  const urlParams = new URLSearchParams(typeof window !== "undefined" ? window.location.search : "");
+  const queryGameId = urlParams.get("gameId");
 
-useEffect(() => {
-  const next = (qsId || pathId || storedId || game?.id || null);
-  setEffectiveGameId(next);
-}, [qsId, pathId, storedId, game?.id]);
+  // stateful "current" id that everything else uses
+  const [effectiveGameId, setEffectiveGameId] = useState(
+    queryGameId || (typeof window !== "undefined" ? localStorage.getItem("lastViewedGameId") : null) || null
+  );
 
-// When we successfully load a game, persist it for refreshes
-useEffect(() => {
-  if (game?.id && typeof window !== "undefined") {
-    localStorage.setItem("lastViewedGameId", game.id);
-  }
-}, [game?.id]);
+  // helper for imperative calls
+  const effectiveId = useCallback(
+    () => effectiveGameId || game?.id || null,
+    [effectiveGameId, game?.id]
+  );
 
+  // keep effectiveGameId up to date once a game loads
+  useEffect(() => {
+    if (game?.id) {
+      if (!effectiveGameId) setEffectiveGameId(game.id);
+      try {
+        localStorage.setItem("lastViewedGameId", game.id);
+      } catch {}
+    }
+  }, [game?.id, effectiveGameId]);
 
-  // --------- Resize listener (fixes dangling "innerWidth);" error) ----------
+  /* ------------------------------ window resize ------------------------------ */
+
   useEffect(() => {
     const handleResize = () => setWindowWidth(window.innerWidth);
-    handleResize(); // initialize
+    handleResize(); // initialize on mount
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
-  // --------- Chat loader ----------
+  /* --------------------------------- chat --------------------------------- */
+
   const loadChatMessages = useCallback(async () => {
     try {
       const gid = effectiveId();
       if (!gid) return;
       const msgs = await ChatMessage.filter({ game_id: gid });
-      // sort ascending by created_date
       const sorted = [...(msgs || [])].sort((a, b) => new Date(a.created_date) - new Date(b.created_date));
       setChatMessages(sorted);
 
-      // unread indicator
       const lastReadKey = `lastRead_${gid}`;
-      const lastRead = localStorage.getItem(lastReadKey);
-      if (!lastRead && sorted.length) {
+      const lastRead = typeof window !== "undefined" ? localStorage.getItem(lastReadKey) : null;
+      if (!sorted.length) {
+        setHasUnreadMessages(false);
+        return;
+      }
+      if (!lastRead) {
         setHasUnreadMessages(true);
         return;
       }
-      if (lastRead && sorted.length) {
-        const newest = sorted[sorted.length - 1].created_date;
-        setHasUnreadMessages(new Date(newest) > new Date(lastRead));
-      } else {
-        setHasUnreadMessages(false);
-      }
+      const newest = sorted[sorted.length - 1].created_date;
+      setHasUnreadMessages(new Date(newest) > new Date(lastRead));
     } catch (e) {
       console.error("Error loading chat messages:", e);
     }
   }, [effectiveId]);
 
-  // --------- Game loader ----------
+  const handleOpenChat = () => {
+    setShowChat(true);
+    setHasUnreadMessages(false);
+    const gid = effectiveId();
+    if (!gid) return;
+    const newest = chatMessages[chatMessages.length - 1]?.created_date || new Date().toISOString();
+    try {
+      localStorage.setItem(`lastRead_${gid}`, newest);
+    } catch {}
+  };
+
+  /* ------------------------------- data load ------------------------------- */
+
   const loadGameData = useCallback(async () => {
-  try {
-    const currentUser = await User.me();
-    setUser(currentUser);
+    try {
+      const currentUser = await User.me();
+      setUser(currentUser);
 
-    // Prefer explicit query param, else already-loaded game id
-    const idFromUrl = gameId || null;
-    let idToLoad = idFromUrl || (game?.id ?? null);
+      let idToLoad = effectiveId();
 
-    // Final guard
-    if (!idToLoad) {
-      console.warn("No game id available (no ?gameId= and no game in state).");
-      setLoading(false);
-      return;
-    }
+      // try to discover a game if we still have no id (user refresh without query, etc.)
+      if (!idToLoad) {
+        const all = await Game.list();
+        const mine = (all || [])
+          .filter((g) => Array.isArray(g.players) && g.players.some((p) => p.email === currentUser.email))
+          .sort(
+            (a, b) =>
+              new Date(b.updated_at || b.created_at || 0) - new Date(a.updated_at || a.created_at || 0)
+          );
 
-    // IMPORTANT: use a single variable; do not redeclare 'currentGame' elsewhere in this function
-    let currentGame = await Game.get(idToLoad);
-    if (!currentGame) {
-      setLoading(false);
-      return;
-    }
-
-    // Derive supply center counts onto players for display
-    if (currentGame.game_state?.supply_centers) {
-      const updatedPlayers = (currentGame.players || []).map((player) => {
-        const count = Object.values(currentGame.game_state.supply_centers)
-          .filter((owner) => owner === player.country).length;
-        return { ...player, supply_centers: count };
-      });
-      currentGame = { ...currentGame, players: updatedPlayers };
-    }
-
-    setGame(currentGame);
-    setUnits(currentGame.game_state?.units || initialUnits || []);
-
-    if (currentGame.game_state?.last_turn_results) {
-      setLastTurnResults(currentGame.game_state.last_turn_results);
-    } else {
-      setLastTurnResults(null);
-    }
-
-    // Reset local order-ish state each load
-    setOrders({});
-    setWinterActions([]);
-    setRetreatOrders({});
-    setIsSubmitted(false);
-
-    // Pull any previously saved moves for this player/turn/phase
-    const filter = {
-      game_id: currentGame.id,
-      player_email: currentUser.email,
-      turn_number: currentGame.current_turn,
-      phase: currentGame.current_phase,
-    };
-
-    if (currentGame.current_phase === "retreat") {
-      const sourcePhase = currentGame.game_state?.phase_after_retreat === "fall" ? "spring" : "fall";
-      filter.source_phase = sourcePhase;
-    }
-
-    const savedMoves = await GameMove.filter(filter);
-    if (savedMoves.length > 0) {
-      const move = savedMoves[0];
-      if (move && move.orders) {
-        setOrders(move.orders || {});
-        setWinterActions(move.winter_actions || []);
-        setRetreatOrders(move.retreat_orders || {});
-        setIsSubmitted(!!move.submitted);
-      } else {
-        setOrders({});
-        setWinterActions([]);
-        setRetreatOrders({});
-        setIsSubmitted(false);
+        const pick = mine.find((g) => g.status === "in_progress") || mine.find((g) => g.status === "waiting") || mine[0];
+        if (pick?.id) {
+          idToLoad = pick.id;
+          setEffectiveGameId(pick.id);
+          try {
+            const u = new URL(window.location.href);
+            u.searchParams.set("gameId", pick.id);
+            window.history.replaceState({}, "", u.toString());
+          } catch {}
+        }
       }
-    } else {
+
+      if (!idToLoad) {
+        console.warn("No game id available (no ?gameId=, no remembered id, and none discovered).");
+        setLoading(false);
+        return;
+      }
+
+      let currentGame = await Game.get(idToLoad);
+      if (!currentGame) {
+        setLoading(false);
+        return;
+      }
+
+      // derive supply center counts on players for display
+      if (currentGame.game_state?.supply_centers) {
+        const updatedPlayers = (currentGame.players || []).map((player) => {
+          const count = Object.values(currentGame.game_state.supply_centers).filter((owner) => owner === player.country)
+            .length;
+          return { ...player, supply_centers: count };
+        });
+        currentGame = { ...currentGame, players: updatedPlayers };
+      }
+
+      setGame(currentGame);
+      setUnits(currentGame.game_state?.units || initialUnits || []);
+      setLastTurnResults(currentGame.game_state?.last_turn_results || null);
+
+      // reset local order state on load
       setOrders({});
       setWinterActions([]);
       setRetreatOrders({});
       setIsSubmitted(false);
+
+      const filter = {
+        game_id: currentGame.id,
+        player_email: currentUser.email,
+        turn_number: currentGame.current_turn,
+        phase: currentGame.current_phase,
+      };
+      if (currentGame.current_phase === "retreat") {
+        const sourcePhase = currentGame.game_state?.phase_after_retreat === "fall" ? "spring" : "fall";
+        filter.source_phase = sourcePhase;
+      }
+
+      const savedMoves = await GameMove.filter(filter);
+      if (savedMoves.length > 0 && savedMoves[0]) {
+        const move = savedMoves[0];
+        setOrders(move.orders || {});
+        setWinterActions(move.winter_actions || []);
+        setRetreatOrders(move.retreat_orders || {});
+        setIsSubmitted(!!move.submitted);
+      }
+
+      await loadChatMessages();
+      setLoading(false);
+    } catch (err) {
+      console.error("Error loading game data:", err);
+      setLoading(false);
     }
-
-    await loadChatMessages();
-    setLoading(false);
-  } catch (err) {
-    console.error("Error loading game data:", err);
-    setLoading(false);
-  }
-}, [gameId, game?.id, loadChatMessages]);
-
+  }, [effectiveId, loadChatMessages]);
 
   useEffect(() => {
-    if (!units) return;
-    // eslint-disable-next-line no-console
-    console.log("Render units:", { count: units.length, sample: units.slice(0, 3) });
-  }, [units]);
+    loadGameData();
+    loadChatMessages();
+  }, [effectiveGameId, loadGameData, loadChatMessages]);
 
-  // --------- Handlers ----------
+  /* ---------------------------- order handlers ---------------------------- */
+
   const handleSetOrder = (unitId, order) => {
     const safeId = stripTempSuffix(String(unitId));
-
-    // Drop empty orders
     if (!order || !order.action) {
       setOrders((prev) => {
         const next = { ...prev };
@@ -253,15 +268,6 @@ useEffect(() => {
       });
       return;
     }
-
-    const normProv = (s) => {
-      if (typeof s !== "string") return s;
-      const t = s.trim();
-      if (!t) return t;
-      const [base, coast] = t.split("/");
-      return coast ? `${base.toUpperCase()}/${coast.toLowerCase()}` : base.toUpperCase();
-    };
-
     setOrders((prev) => ({
       ...prev,
       [safeId]: {
@@ -284,15 +290,6 @@ useEffect(() => {
       });
       return;
     }
-
-    const normProv = (s) => {
-      if (typeof s !== "string") return s;
-      const t = s.trim();
-      if (!t) return t;
-      const [base, coast] = t.split("/");
-      return coast ? `${base.toUpperCase()}/${coast.toLowerCase()}` : base.toUpperCase();
-    };
-
     setRetreatOrders((prev) => ({
       ...prev,
       [String(unitId)]: {
@@ -311,7 +308,143 @@ useEffect(() => {
     });
   };
 
-  // --------- Phase advancement (unchanged except for effectiveId usage) ----------
+  /* ----------------------------- save / submit ---------------------------- */
+
+  const handleSaveOrders = async (isFinalSubmission) => {
+    try {
+      setIsSavingOrders(true);
+      if (!game || !user) {
+        alert("Game or user data not loaded.");
+        return;
+      }
+      if (!game.current_turn || !game.current_phase) {
+        alert("Game state not fully loaded.");
+        return;
+      }
+      const gid = effectiveId();
+      if (!gid) {
+        alert("Cannot save orders: Game ID is missing.");
+        return;
+      }
+
+      const userPlayer = game.players?.find((p) => p.email === user.email);
+      if (!userPlayer) {
+        alert("You are not a player in this game.");
+        return;
+      }
+
+      let formattedOrders;
+      if (game.current_phase === "winter") {
+        const arr = Array.isArray(winterActions) ? winterActions : [];
+        const builds = arr
+          .filter((o) => o && o.action === "build")
+          .map((o) => ({ action: "build", territory: o.territory, unit_type: o.unit_type }));
+        const disbands = arr
+          .filter((o) => o && o.action === "disband")
+          .map((o) => {
+            const rawId = o.unit_id ?? o.unit?.id ?? null;
+            const unit_id = rawId ? stripTempSuffix(String(rawId)) : null;
+            return unit_id ? { action: "disband", unit_id } : null;
+          })
+          .filter(Boolean);
+        formattedOrders = [...disbands, ...builds];
+      } else if (game.current_phase === "retreat") {
+        formattedOrders = Object.entries(retreatOrders).map(([unit_id, o]) => ({
+          ...o,
+          unit_id: stripTempSuffix(String(unit_id)),
+        }));
+      } else {
+        formattedOrders = Object.entries(orders)
+          .map(([unit_id, o]) => ({
+            ...o,
+            unit_id: stripTempSuffix(String(unit_id)),
+            territory: normProv(o.territory),
+            target: normProv(o.target),
+            target_of_support: normProv(o.target_of_support),
+            convoy_destination: normProv(o.convoy_destination),
+          }))
+          .filter((o) => !!o.action);
+      }
+
+      const filter = {
+        game_id: gid,
+        player_email: user.email,
+        turn_number: game.current_turn,
+        phase: game.current_phase,
+      };
+      const moveData = { orders: formattedOrders, submitted: isFinalSubmission };
+
+      if (game.current_phase === "retreat") {
+        const sourcePhase = game.game_state?.phase_after_retreat === "fall" ? "spring" : "fall";
+        filter.source_phase = sourcePhase;
+        moveData.source_phase = sourcePhase;
+      }
+
+      const existing = await GameMove.filter(filter);
+      if (existing.length > 0) {
+        await GameMove.update(existing[0].id, moveData);
+      } else {
+        await GameMove.create({
+          game_id: gid,
+          player_email: user.email,
+          country: userPlayer.country,
+          turn_number: game.current_turn,
+          phase: game.current_phase,
+          ...moveData,
+        });
+      }
+
+      if (isFinalSubmission) {
+        setIsSubmitted(true);
+        await checkAndAdvancePhase();
+      } else {
+        setIsSubmitted(false);
+      }
+    } catch (error) {
+      console.error("Error saving orders:", error);
+      alert("Failed to save orders. Please try again.");
+    } finally {
+      setIsSavingOrders(false);
+    }
+  };
+
+  const handleUnsubmitOrders = async () => {
+    try {
+      if (!game || !user) {
+        alert("Game or user data not loaded.");
+        return;
+      }
+      if (!game.current_turn || !game.current_phase) {
+        alert("Game state not fully loaded.");
+        return;
+      }
+
+      const filter = {
+        game_id: effectiveId(),
+        player_email: user.email,
+        turn_number: game.current_turn,
+        phase: game.current_phase,
+      };
+      if (game.current_phase === "retreat") {
+        filter.source_phase = game.game_state?.phase_after_retreat === "fall" ? "spring" : "fall";
+      }
+
+      const existing = await GameMove.filter(filter);
+      if (existing.length > 0) {
+        await GameMove.update(existing[0].id, { submitted: false, orders: [] });
+        setIsSubmitted(false);
+        alert("Orders unsubmitted!");
+      } else {
+        alert("No submitted orders found to unsubmit.");
+      }
+    } catch (error) {
+      console.error("Error unsubmitting orders:", error);
+      alert("Failed to unsubmit orders. Please try again.");
+    }
+  };
+
+  /* --------------------------- phase advancement --------------------------- */
+
   const advancePhase = useCallback(async () => {
     try {
       setIsResolving(true);
@@ -330,24 +463,12 @@ useEffect(() => {
           phase: game.current_phase,
         });
 
-        let allOrdersRaw = allMoves.flatMap((move) => move.orders || []);
-        const ordersForDisplay = Array.isArray(allOrdersRaw) ? [...allOrdersRaw] : [];
-
-        const unitId = (x) => (x ? stripTempSuffix(String(x)) : null);
-        const liveUnitIds = new Set((units || []).map((u) => unitId(u.id)));
-
+        const allOrdersRaw = allMoves.flatMap((move) => move.orders || []);
         const ordersForAdjudication = (allOrdersRaw || [])
           .map((o) => {
             if (!o) return null;
-            const uid = unitId(o.unit_id ?? o.unit?.id);
+            const uid = stripTempSuffix(String(o.unit_id ?? o.unit?.id ?? ""));
             if (!uid) return null;
-            const normProv = (s) => {
-              if (typeof s !== "string") return s;
-              const t = s.trim();
-              if (!t) return t;
-              const [base, coast] = t.split("/");
-              return coast ? `${base.toUpperCase()}/${coast.toLowerCase()}` : base.toUpperCase();
-            };
             return {
               ...o,
               unit_id: uid,
@@ -359,24 +480,24 @@ useEffect(() => {
           })
           .filter(Boolean);
 
-        const adjudicationResult = adjudicate(units, ordersForAdjudication);
-        newUnits = adjudicationResult.newUnits;
+        const result = adjudicate(units, ordersForAdjudication);
+        newUnits = result.newUnits;
 
         const movePhaseResults = {
           phase: game.current_phase,
           turn: game.current_turn,
-          orders: ordersForDisplay,
+          orders: Array.isArray(allOrdersRaw) ? [...allOrdersRaw] : [],
           successful_moves: [],
           failed_moves: [],
           holds: [],
-          dislodged_units: adjudicationResult.dislodgedUnits || [],
+          dislodged_units: result.dislodgedUnits || [],
         };
 
         ordersForAdjudication.forEach((order) => {
           if (order.action === "move") {
-            const originalUnit = units.find((u) => u.id === order.unit_id);
-            const resultUnit = newUnits.find((u) => u.id === order.unit_id);
-            if (originalUnit && resultUnit && resultUnit.territory === order.target) {
+            const before = units.find((u) => u.id === order.unit_id);
+            const after = newUnits.find((u) => u.id === order.unit_id);
+            if (before && after && after.territory === order.target) {
               movePhaseResults.successful_moves.push(order);
             } else {
               movePhaseResults.failed_moves.push(order);
@@ -389,8 +510,8 @@ useEffect(() => {
         newGameState.units = newUnits;
         newGameState.last_turn_results = movePhaseResults;
 
-        if (adjudicationResult.dislodgedUnits.length > 0) {
-          newGameState.retreats_required = (adjudicationResult.dislodgedUnits || [])
+        if (result.dislodgedUnits.length > 0) {
+          newGameState.retreats_required = (result.dislodgedUnits || [])
             .filter((r) => r && r.unit && r.unit.id)
             .map((r) => ({
               unit: r.unit,
@@ -417,6 +538,7 @@ useEffect(() => {
         }
 
         if (game.current_phase === "fall") {
+          // update supply centers
           const supplyCenterOwners = {};
           for (const terrId in territories) {
             if (territories[terrId].supply_center) {
@@ -426,26 +548,22 @@ useEffect(() => {
           for (const terrId in territories) {
             if (territories[terrId].supply_center) {
               const occupyingUnit = newUnits.find((u) => baseProv(u.territory) === terrId);
-              if (occupyingUnit) {
-                supplyCenterOwners[terrId] = occupyingUnit.country;
-              }
+              if (occupyingUnit) supplyCenterOwners[terrId] = occupyingUnit.country;
             }
           }
           newGameState.supply_centers = supplyCenterOwners;
 
-          newPlayers = game.players.map((player) => {
-            const count = Object.values(supplyCenterOwners).filter((owner) => owner === player.country).length;
-            return { ...player, supply_centers: count };
+          newPlayers = game.players.map((p) => {
+            const count = Object.values(supplyCenterOwners).filter((owner) => owner === p.country).length;
+            return { ...p, supply_centers: count };
           });
 
           const playerUnitCounts = newPlayers.reduce((acc, p) => {
             acc[p.country] = newUnits.filter((u) => u.country === p.country).length;
             return acc;
           }, {});
-          newPlayers.forEach((player) => {
-            if (player.supply_centers !== (playerUnitCounts[player.country] || 0)) {
-              adjustmentsNeeded = true;
-            }
+          newPlayers.forEach((p) => {
+            if (p.supply_centers !== (playerUnitCounts[p.country] || 0)) adjustmentsNeeded = true;
           });
 
           const winner = newPlayers.find((p) => p.supply_centers >= 18);
@@ -503,28 +621,21 @@ useEffect(() => {
 
         allRetreatOrders.forEach((order) => {
           if (order.action === "retreat" && order.target) {
-            const unitIndex = currentUnits.findIndex((u) => u.id === order.unit_id);
-            if (unitIndex !== -1) {
-              currentUnits[unitIndex].territory = order.target;
-              delete currentUnits[unitIndex].dislodged;
+            const idx = currentUnits.findIndex((u) => u.id === order.unit_id);
+            if (idx !== -1) {
+              currentUnits[idx].territory = order.target;
+              delete currentUnits[idx].dislodged;
             }
           }
         });
 
-        const requiredRetreatUnitIds = new Set(retreatsRequired.map((r) => r.unit.id));
-        const submittedOrderUnitIds = new Set(allRetreatOrders.map((o) => o.unit_id));
-        const unitsToDisbandIds = new Set();
-
-        allRetreatOrders.forEach((order) => {
-          if (order.action === "disband") {
-            unitsToDisbandIds.add(order.unit_id);
-          }
-        });
-
-        requiredRetreatUnitIds.forEach((unitId) => {
-          if (!submittedOrderUnitIds.has(unitId)) {
-            unitsToDisbandIds.add(unitId);
-          }
+        const requiredIds = new Set(retreatsRequired.map((r) => r.unit.id));
+        const submittedIds = new Set(allRetreatOrders.map((o) => o.unit_id));
+        const disbandIds = new Set(
+          allRetreatOrders.filter((o) => o.action === "disband").map((o) => o.unit_id)
+        );
+        requiredIds.forEach((uid) => {
+          if (!submittedIds.has(uid)) disbandIds.add(uid);
         });
 
         const retreatResults = {
@@ -538,60 +649,53 @@ useEffect(() => {
 
         retreatsRequired.forEach((retreat) => {
           const order = allRetreatOrders.find((o) => o.unit_id === retreat.unit.id);
-          const wasDisbanded = unitsToDisbandIds.has(retreat.unit.id);
-          const originalUnit = retreat.unit;
-
+          const wasDisbanded = disbandIds.has(retreat.unit.id);
           if (order && order.action === "retreat" && order.target && !wasDisbanded) {
-            retreatResults.successful_moves.push({ ...order, unit: originalUnit });
+            retreatResults.successful_moves.push({ ...order, unit: retreat.unit });
           } else {
             retreatResults.failed_moves.push({
-              unit_id: originalUnit.id,
+              unit_id: retreat.unit.id,
               action: "disband",
-              territory: originalUnit.territory,
-              unit: originalUnit,
+              territory: retreat.unit.territory,
+              unit: retreat.unit,
             });
           }
         });
-        newGameState.last_turn_results = retreatResults;
 
-        currentUnits = currentUnits.filter((u) => u?.id && !unitsToDisbandIds.has(u.id) && !u.dislodged);
-        newUnits = currentUnits;
-        newGameState.units = newUnits;
+        currentUnits = currentUnits.filter((u) => u?.id && !disbandIds.has(u.id) && !u.dislodged);
+        const newUnitsFinal = currentUnits;
+        newUnits = newUnitsFinal;
+        let nextPhase = game.game_state.phase_after_retreat;
+        const newGame = { ...game.game_state, units: newUnitsFinal, last_turn_results: retreatResults };
+        delete newGame.retreats_required;
+        delete newGame.phase_after_retreat;
+        newGameState = newGame;
 
-        let derivedNextPhase = game.game_state.phase_after_retreat;
-        delete newGameState.retreats_required;
-        delete newGameState.phase_after_retreat;
-
-        if (derivedNextPhase === "winter") {
+        if (nextPhase === "winter") {
+          // same as end-of-fall supply center recalc
           const supplyCenterOwners = {};
           for (const terrId in territories) {
-            if (territories[terrId].supply_center) {
-              supplyCenterOwners[terrId] = newGameState.supply_centers?.[terrId] || null;
-            }
+            if (territories[terrId].supply_center) supplyCenterOwners[terrId] = newGameState.supply_centers?.[terrId] || null;
           }
           for (const terrId in territories) {
             if (territories[terrId].supply_center) {
-              const occupyingUnit = newUnits.find((u) => baseProv(u.territory) === terrId);
-              if (occupyingUnit) {
-                supplyCenterOwners[terrId] = occupyingUnit.country;
-              }
+              const occupyingUnit = newUnitsFinal.find((u) => baseProv(u.territory) === terrId);
+              if (occupyingUnit) supplyCenterOwners[terrId] = occupyingUnit.country;
             }
           }
           newGameState.supply_centers = supplyCenterOwners;
 
-          newPlayers = game.players.map((player) => {
-            const count = Object.values(supplyCenterOwners).filter((owner) => owner === player.country).length;
-            return { ...player, supply_centers: count };
+          newPlayers = game.players.map((p) => {
+            const count = Object.values(supplyCenterOwners).filter((owner) => owner === p.country).length;
+            return { ...p, supply_centers: count };
           });
 
           const playerUnitCounts = newPlayers.reduce((acc, p) => {
-            acc[p.country] = newUnits.filter((u) => u.country === p.country).length;
+            acc[p.country] = newUnitsFinal.filter((u) => u.country === p.country).length;
             return acc;
           }, {});
-          newPlayers.forEach((player) => {
-            if (player.supply_centers !== (playerUnitCounts[player.country] || 0)) {
-              adjustmentsNeeded = true;
-            }
+          newPlayers.forEach((p) => {
+            if (p.supply_centers !== (playerUnitCounts[p.country] || 0)) adjustmentsNeeded = true;
           });
 
           const winner = newPlayers.find((p) => p.supply_centers >= 18);
@@ -617,7 +721,7 @@ useEffect(() => {
             nextTurn = game.current_turn + 1;
           }
         } else {
-          nextPhaseForUpdate = derivedNextPhase;
+          nextPhaseForUpdate = nextPhase;
           nextTurn = nextPhaseForUpdate === "spring" ? game.current_turn + 1 : game.current_turn;
         }
       } else if (game.current_phase === "winter") {
@@ -634,7 +738,6 @@ useEffect(() => {
 
         const builtUnits = [];
         const existingIds = new Set((unitsAfterDisbands || []).map((u) => String(u.id).toUpperCase()));
-
         winterMoves.forEach((move) => {
           const country = move.country;
           const buildsForThisMove = (Array.isArray(move.orders) ? move.orders : []).filter((o) => o.action === "build");
@@ -643,14 +746,7 @@ useEffect(() => {
             const type = buildOrder.unit_type;
             const id = makeUnitId(country, origin, type, existingIds);
             existingIds.add(id);
-            builtUnits.push({
-              id,
-              country,
-              type,
-              territory: origin,
-              home: origin,
-              origin: origin,
-            });
+            builtUnits.push({ id, country, type, territory: origin, home: origin, origin });
           });
         });
 
@@ -680,17 +776,14 @@ useEffect(() => {
     } finally {
       setIsResolving(false);
     }
-  }, [game, effectiveId, units, loadGameData]);
+  }, [game, units, effectiveId, loadGameData]);
 
   const checkAndAdvancePhase = useCallback(
     async (forceAdvance = false) => {
       try {
-        if (!game) {
-          console.warn("Game object is not loaded when trying to checkAndAdvancePhase.");
-          return;
-        }
+        if (!game) return;
 
-        const filterOptions = {
+        const filter = {
           game_id: effectiveId(),
           turn_number: game.current_turn,
           phase: game.current_phase,
@@ -698,11 +791,10 @@ useEffect(() => {
         };
 
         if (game.current_phase === "retreat") {
-          const sourcePhase = game.game_state?.phase_after_retreat === "fall" ? "spring" : "fall";
-          filterOptions.source_phase = sourcePhase;
+          filter.source_phase = game.game_state?.phase_after_retreat === "fall" ? "spring" : "fall";
         }
 
-        const allSubmittedMoves = await GameMove.filter(filterOptions);
+        const submittedMoves = await GameMove.filter(filter);
 
         let requiredPlayers;
         if (game.current_phase === "winter") {
@@ -719,13 +811,13 @@ useEffect(() => {
           const retreatsRequired = Array.isArray(game.game_state?.retreats_required)
             ? game.game_state.retreats_required.filter((r) => r && r.unit && r.unit.id)
             : [];
-          const countriesWithRetreats = new Set(retreatsRequired.map((r) => r.unit?.country).filter(Boolean));
-          requiredPlayers = (game.players || []).filter((p) => countriesWithRetreats.has(p.country) && !p.is_dummy);
+          const countries = new Set(retreatsRequired.map((r) => r.unit?.country).filter(Boolean));
+          requiredPlayers = (game.players || []).filter((p) => countries.has(p.country) && !p.is_dummy);
         } else {
           requiredPlayers = (game.players || []).filter((p) => !p.is_dummy);
         }
 
-        const submittedEmails = new Set(allSubmittedMoves.map((m) => m.player_email));
+        const submittedEmails = new Set(submittedMoves.map((m) => m.player_email));
         const requiredEmails = new Set(requiredPlayers.map((p) => p.email));
         const submittedCount = [...requiredEmails].filter((e) => submittedEmails.has(e)).length;
 
@@ -739,216 +831,21 @@ useEffect(() => {
         console.error("Error checking phase advancement:", error);
       }
     },
-    [game, effectiveId, advancePhase, units]
+    [game, units, effectiveId, advancePhase]
   );
 
-  // Reset guard each time the deadline changes
+  // timer expiry
   useEffect(() => {
     autoAdvanceFiredRef.current = false;
   }, [game?.phase_deadline]);
 
-  // Called once when the timer expires
   const handlePhaseExpired = useCallback(() => {
     if (autoAdvanceFiredRef.current) return;
     autoAdvanceFiredRef.current = true;
     checkAndAdvancePhase(true);
   }, [checkAndAdvancePhase]);
 
-  const handleSaveOrders = async (isFinalSubmission) => {
-    try {
-      setIsSavingOrders(true);
-      const userPlayer = game.players?.find((p) => p.email === user.email);
-      if (!userPlayer) {
-        alert("You are not a player in this game.");
-        return;
-      }
-      if (!effectiveId()) {
-        alert("Cannot save orders: Game ID is missing.");
-        return;
-      }
-      if (!game || !game.current_turn || !game.current_phase) {
-        alert("Game state not fully loaded. Cannot save orders.");
-        return;
-      }
-
-      const isWinter = game.current_phase === "winter";
-      const isRetreat = game.current_phase === "retreat";
-      let formattedOrders;
-
-      if (isWinter) {
-        const buildOrders = winterActions.filter((action) => action.action === "build");
-        if (buildOrders.length > 3) {
-          alert("You can build a maximum of 3 units in winter. Please adjust your build orders.");
-          return;
-        }
-        formattedOrders = Array.isArray(winterActions) ? winterActions : [];
-      } else if (isRetreat) {
-        formattedOrders = Object.entries(retreatOrders).map(([unit_id, o]) => ({
-          ...o,
-          unit_id: stripTempSuffix(String(unit_id)),
-        }));
-      } else {
-        formattedOrders = Object.entries(orders).map(([unit_id, o]) => ({
-          ...o,
-          unit_id: stripTempSuffix(String(unit_id)),
-        }));
-      }
-
-      const unitSet = new Set((units || []).map((u) => String(u.id)));
-      const arr = Array.isArray(formattedOrders) ? formattedOrders : [];
-      if (game.current_phase === "winter") {
-        const builds = arr
-          .filter((o) => o && o.action === "build")
-          .map((o) => ({
-            action: "build",
-            territory: o.territory,
-            unit_type: o.unit_type,
-          }));
-        const disbands = arr
-          .filter((o) => o && o.action === "disband")
-          .map((o) => {
-            const rawId = o.unit_id ?? o.unit?.id ?? null;
-            const unit_id = rawId ? stripTempSuffix(String(rawId)) : null;
-            return unit_id ? { action: "disband", unit_id } : null;
-          })
-          .filter(Boolean)
-          .filter((o) => unitSet.has(o.unit_id));
-        formattedOrders = [...disbands, ...builds];
-      } else {
-        const norm = (s) => (typeof s === "string" ? s.trim().toUpperCase() : s);
-        formattedOrders = arr
-          .map((o) => {
-            if (!o) return null;
-            const rawId = o.unit_id ?? o.unit?.id ?? null;
-            const unit_id = rawId ? stripTempSuffix(String(rawId)) : null;
-            if (!unit_id) return null;
-            return {
-              ...o,
-              unit_id,
-              territory: norm(o.territory),
-              target: norm(o.target),
-              target_of_support: norm(o.target_of_support),
-              convoy_destination: norm(o.convoy_destination),
-            };
-          })
-          .filter(Boolean);
-      }
-
-      const filter = {
-        game_id: effectiveId(),
-        player_email: user.email,
-        turn_number: game.current_turn,
-        phase: game.current_phase,
-      };
-
-      const moveData = {
-        orders: formattedOrders,
-        submitted: isFinalSubmission,
-      };
-
-      if (game.current_phase === "retreat") {
-        const sourcePhase = game.game_state?.phase_after_retreat === "fall" ? "spring" : "fall";
-        filter.source_phase = sourcePhase;
-        moveData.source_phase = sourcePhase;
-      }
-
-      const existingMoves = await GameMove.filter(filter);
-
-      if (existingMoves.length > 0) {
-        await GameMove.update(existingMoves[0].id, moveData);
-      } else {
-        await GameMove.create({
-          game_id: effectiveId(),
-          player_email: user.email,
-          country: userPlayer.country,
-          turn_number: game.current_turn,
-          phase: game.current_phase,
-          ...moveData,
-        });
-      }
-
-      if (isFinalSubmission) {
-        setIsSubmitted(true);
-        await checkAndAdvancePhase();
-      } else {
-        setIsSubmitted(false);
-      }
-    } catch (error) {
-      console.error("Error saving orders:", error);
-      alert("Failed to save orders. Please try again.");
-      throw error;
-    } finally {
-      setIsSavingOrders(false);
-    }
-  };
-
-  const handleUnsubmitOrders = async () => {
-    try {
-      if (!game || !user) {
-        alert("Game or user data not loaded.");
-        return;
-      }
-      if (!game.current_turn || !game.current_phase) {
-        alert("Game state not fully loaded. Cannot unsubmit orders.");
-        return;
-      }
-
-      const filterOptions = {
-        game_id: effectiveId(),
-        player_email: user.email,
-        turn_number: game.current_turn,
-        phase: game.current_phase,
-      };
-
-      if (game.current_phase === "retreat") {
-        const sourcePhase = game.game_state?.phase_after_retreat === "fall" ? "spring" : "fall";
-        filterOptions.source_phase = sourcePhase;
-      }
-
-      const existingMoves = await GameMove.filter(filterOptions);
-
-      if (existingMoves.length > 0) {
-        await GameMove.update(existingMoves[0].id, { submitted: false, orders: [] });
-        setIsSubmitted(false);
-        alert("Orders unsubmitted!");
-      } else {
-        alert("No submitted orders found to unsubmit.");
-      }
-    } catch (error) {
-      console.error("Error unsubmitting orders:", error);
-      alert("Failed to unsubmit orders. Please try again.");
-    }
-  };
-
-  const handleOpenChat = () => {
-    setShowChat(true);
-    setHasUnreadMessages(false);
-    const gid = effectiveId();
-    if (chatMessages.length > 0 && gid) {
-      localStorage.setItem(`lastRead_${gid}`, chatMessages[chatMessages.length - 1].created_date);
-    } else if (gid) {
-      localStorage.setItem(`lastRead_${gid}`, new Date().toISOString());
-    }
-  };
-
-  const getDisplayYear = (turn /*, phase */) => {
-    const baseYear = 1901;
-    return baseYear + (turn - 1);
-  };
-
-  const formatPhaseDisplay = (turn, phase) => {
-    const year = getDisplayYear(turn, phase);
-    const capitalizedPhase = phase.charAt(0).toUpperCase() + phase.slice(1);
-    if (phase === "retreat") {
-      const originalPhase = game.game_state?.phase_after_retreat;
-      const originalPhaseCapitalized = originalPhase ? originalPhase.charAt(0).toUpperCase() + originalPhase.slice(1) : "";
-      return `${originalPhaseCapitalized} ${year} Retreats`;
-    }
-    return `${capitalizedPhase} ${year}`;
-  };
-
-  // Reload button handler
-  const [isRefreshing, setIsRefreshing] = useState(false);
+  // manual refresh
   const onReload = useCallback(async () => {
     try {
       setIsRefreshing(true);
@@ -959,11 +856,7 @@ useEffect(() => {
     }
   }, [loadGameData, loadChatMessages]);
 
-  // Initial load & when id changes
-  useEffect(() => {
-    loadGameData();
-    loadChatMessages();
-  }, [effectiveGameId, loadGameData, loadChatMessages]);
+  /* --------------------------------- UI --------------------------------- */
 
   if (loading || isResolving) {
     return (
@@ -1008,7 +901,9 @@ useEffect(() => {
             <div>
               <h1 className="text-lg md:text-xl font-bold text-slate-900">{game.name}</h1>
               <div className="flex items-center gap-2 md:gap-4 text-xs md:text-sm text-slate-600">
-                <span>{formatPhaseDisplay(game.current_turn, game.current_phase)}</span>
+                <span>
+                  {game.current_phase.charAt(0).toUpperCase() + game.current_phase.slice(1)} {1900 + game.current_turn}
+                </span>
                 {userPlayer && (
                   <span className="flex items-center gap-1">
                     Playing as
@@ -1067,83 +962,14 @@ useEffect(() => {
               lastTurnResults={lastTurnResults}
               onBackgroundClick={() => setShowPlayerPanel(false)}
             />
-            {game.status === "completed" && showVictoryOverlay && (
-              <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-10 backdrop-blur-sm">
-                <motion.div
-                  initial={{ opacity: 0, scale: 0.9, y: -50 }}
-                  animate={{ opacity: 1, scale: 1, y: 0 }}
-                  transition={{ type: "spring", stiffness: 300, damping: 30 }}
-                >
-                  <Card className="text-center p-8 max-w-md relative">
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => setShowVictoryOverlay(false)}
-                      className="absolute top-2 right-2 text-slate-400 hover:text-slate-600"
-                    >
-                      <X className="w-4 h-4" />
-                    </Button>
-                    <CardHeader>
-                      <div className="w-16 h-16 mx-auto mb-4 bg-gradient-to-br from-yellow-400 to-yellow-600 rounded-full flex items-center justify-center">
-                        <Crown className="w-8 h-8 text-white" />
-                      </div>
-                      <CardTitle className="text-2xl">
-                        {game.winners?.length > 1 ? "Diplomatic Draw!" : "Victory Achieved!"}
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      {game.winners?.length > 1 ? (
-                        <div>
-                          <p className="mb-4 text-slate-600">The remaining powers have agreed to a diplomatic draw:</p>
-                          <div className="flex justify-center gap-2 flex-wrap mb-4">
-                            {game.players
-                              .filter((p) => game.winners.includes(p.email))
-                              .map((p) => (
-                                <Badge key={p.email} style={{ backgroundColor: p.color }} className="text-white text-sm px-3 py-1 shadow">
-                                  {p.country}
-                                </Badge>
-                              ))}
-                          </div>
-                          <p className="text-sm text-slate-500 italic">
-                            "In diplomacy, sometimes the greatest victory is knowing when to share power."
-                          </p>
-                        </div>
-                      ) : (
-                        <div>
-                          <p className="text-slate-600 mb-2">
-                            <span
-                              className="font-bold text-xl"
-                              style={{ color: game.players?.find((p) => p.country === game.winner_country)?.color }}
-                            >
-                              {game.winner_country}
-                            </span>{" "}
-                            has conquered Europe!
-                          </p>
-                          <p className="text-sm text-slate-500 italic mb-4">
-                            "Through cunning diplomacy and strategic brilliance, a new empire rises."
-                          </p>
-                        </div>
-                      )}
-                      <div className="flex gap-3 justify-center">
-                        <Button variant="outline" onClick={() => setShowVictoryOverlay(false)}>
-                          Continue Viewing
-                        </Button>
-                        <Link to={createPageUrl("GameLobby")}>
-                          <Button size="lg" className="bg-gradient-to-r from-blue-600 to-blue-700">
-                            Return to Lobby
-                          </Button>
-                        </Link>
-                      </div>
-                    </CardContent>
-                  </Card>
-                </motion.div>
-              </div>
+            {game.status === "completed" && (
+              <div className="absolute inset-0 pointer-events-none" />
             )}
           </div>
         </div>
       </div>
 
-      {/* Player Panel as Overlay */}
+      {/* Player Panel */}
       {showPlayerPanel && (
         <motion.div
           initial={{ x: -400 }}
@@ -1168,7 +994,6 @@ useEffect(() => {
                   const newVotes = v
                     ? [...new Set([...currentVotes, user.email])]
                     : currentVotes.filter((email) => email !== user.email);
-                  setGame((prev) => ({ ...prev, draw_votes: newVotes }));
                   await Game.update(effectiveId(), { draw_votes: newVotes });
 
                   const activePlayerEmails = (game.players || [])
@@ -1205,7 +1030,7 @@ useEffect(() => {
         </motion.div>
       )}
 
-      {/* Chat Panel as Overlay */}
+      {/* Chat Panel */}
       {showChat && (
         <motion.div
           initial={isMobile ? { y: "100%" } : { x: "100%" }}
@@ -1214,22 +1039,30 @@ useEffect(() => {
           transition={{ type: "spring", stiffness: 350, damping: 40 }}
           className="fixed inset-0 z-50 md:absolute md:inset-y-0 md:right-0 md:w-96 md:max-w/full bg-white md:border-l md:border-slate-200 md:shadow-xl"
         >
-          <GameChat game={game} user={user} messages={chatMessages} onSendMessage={async (message, threadId, participants) => {
-            try {
-              const userCountry = game.players?.find((p) => p.email === user.email)?.country;
-              await ChatMessage.create({
-                game_id: effectiveId(),
-                thread_id: threadId,
-                thread_participants: participants,
-                sender_email: user.email,
-                sender_country: userCountry,
-                message,
-              });
-              loadChatMessages();
-            } catch (error) {
-              console.error("Error sending message:", error);
-            }
-          }} onClose={() => setShowChat(false)} />
+          <GameChat
+            game={game}
+            user={user}
+            messages={chatMessages}
+            onSendMessage={async (message, threadId, participants) => {
+              try {
+                const gid = effectiveId();
+                if (!gid) return;
+                const userCountry = game.players?.find((p) => p.email === user.email)?.country;
+                await ChatMessage.create({
+                  game_id: gid,
+                  thread_id: threadId,
+                  thread_participants: participants,
+                  sender_email: user.email,
+                  sender_country: userCountry,
+                  message,
+                });
+                loadChatMessages();
+              } catch (error) {
+                console.error("Error sending message:", error);
+              }
+            }}
+            onClose={() => setShowChat(false)}
+          />
         </motion.div>
       )}
     </div>
