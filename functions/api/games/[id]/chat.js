@@ -1,5 +1,5 @@
 // functions/api/games/[id]/chat.js
-import { json } from "../../_utils.js";
+import { json } from "../../../_utils.js";
 
 export async function onRequestGet({ params, env }) {
   const { id } = params;
