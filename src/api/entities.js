@@ -37,9 +37,6 @@ export const User = {
 
 // ---------- Game ----------
 export const Game = {
-  async get(id) {
-    return http(`/games/${id}`);
-  },
   async list() {
     try {
       const r = await http("/games");
