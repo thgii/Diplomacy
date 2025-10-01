@@ -2,57 +2,33 @@
 import { http, getPlayer, setPlayer } from "./http";
 
 // ---------- User ----------
-import { http, getPlayer, setPlayer } from "./http";
-
 export const User = {
   async me() {
+    // Prefer server session (cookie); fall back to local cache
     try {
       const res = await http("/session", { method: "GET" });
       if (res && res.id) {
         setPlayer(res);
         return res;
       }
-    } catch (e) {
-      // If the cookie is invalid now, ensure we don't keep a stale local player
-      setPlayer(null);
-    }
+    } catch {}
     return getPlayer();
   },
 
   async login(nickname, passcode) {
     const payload = { nickname };
     if (passcode) payload.passcode = passcode;
-
-    try {
-      const session = await http("/session", {
-        method: "POST",
-        body: payload,
-      });
-      setPlayer(session);
-      return session;
-    } catch (e) {
-      // Improve the message shown by your UI
-      let msg = "Sign-in failed.";
-      if (e?.status === 401) {
-        // API might return something like { error: "passcode_required" } or { error: "invalid_credentials" }
-        const apiErr = e?.body?.error || e?.body?.message || e?.message;
-        msg = `Sign-in failed: ${apiErr || "Unauthorized"}`;
-      } else if (e?.body?.error || e?.body?.message) {
-        msg = `Sign-in failed: ${e.body.error || e.body.message}`;
-      }
-      // Re-throw a clean error for your UI layer to display
-      const err = new Error(msg);
-      err.cause = e;
-      throw err;
-    }
+    const session = await http("/session", {
+      method: "POST",
+      body: payload, // http() will JSON.stringify
+    });
+    setPlayer(session);
+    return session; // { id, nickname, ... , passcode? }
   },
 
   async logout() {
-    try {
-      await http("/session", { method: "DELETE" });
-    } finally {
-      setPlayer(null);
-    }
+    await http("/session", { method: "DELETE" });
+    setPlayer(null);
   },
 };
 
