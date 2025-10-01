@@ -1,17 +1,20 @@
 // src/api/entities.js
-import { http as httpRequest, getPlayer, setPlayer } from "./http";
+import { http, getPlayer, setPlayer } from "./http";
 
-/* ========================= User ========================= */
+// ---------- User ----------
+import { http, getPlayer, setPlayer } from "./http";
+
 export const User = {
   async me() {
     try {
-      const res = await httpRequest("/session", { method: "GET" });
+      const res = await http("/session", { method: "GET" });
       if (res && res.id) {
         setPlayer(res);
         return res;
       }
-    } catch {
-      setPlayer(null); // clear stale local if cookie/session invalid
+    } catch (e) {
+      // If the cookie is invalid now, ensure we don't keep a stale local player
+      setPlayer(null);
     }
     return getPlayer();
   },
@@ -21,20 +24,23 @@ export const User = {
     if (passcode) payload.passcode = passcode;
 
     try {
-      const session = await httpRequest("/session", {
+      const session = await http("/session", {
         method: "POST",
-        body: payload, // auto-stringified by http()
+        body: payload,
       });
       setPlayer(session);
       return session;
     } catch (e) {
+      // Improve the message shown by your UI
       let msg = "Sign-in failed.";
       if (e?.status === 401) {
-        const apiErr = e?.body?.error || e?.body?.message || "Unauthorized";
-        msg = `Sign-in failed: ${apiErr}`;
+        // API might return something like { error: "passcode_required" } or { error: "invalid_credentials" }
+        const apiErr = e?.body?.error || e?.body?.message || e?.message;
+        msg = `Sign-in failed: ${apiErr || "Unauthorized"}`;
       } else if (e?.body?.error || e?.body?.message) {
         msg = `Sign-in failed: ${e.body.error || e.body.message}`;
       }
+      // Re-throw a clean error for your UI layer to display
       const err = new Error(msg);
       err.cause = e;
       throw err;
@@ -43,23 +49,23 @@ export const User = {
 
   async logout() {
     try {
-      await httpRequest("/session", { method: "DELETE" });
+      await http("/session", { method: "DELETE" });
     } finally {
       setPlayer(null);
     }
   },
 };
 
-/* ========================= Game ========================= */
+// ---------- Game ----------
 export const Game = {
   async get(id) {
     if (!id) throw new Error("Game.get: missing id");
-    return httpRequest(`/games/${encodeURIComponent(id)}`);
+    return http(`/games/${encodeURIComponent(id)}`);
   },
 
   async list() {
     try {
-      const r = await httpRequest("/games");
+      const r = await http("/games");
       return Array.isArray(r) ? r : [];
     } catch (e) {
       console.error("Game.list failed:", e);
@@ -68,6 +74,7 @@ export const Game = {
   },
 
   async create(data) {
+    // Normalize field names from your form -> API expects snake_case
     const payload = {
       name: data?.name ?? data?.title ?? "New Game",
       max_players: toNum(data?.max_players ?? data?.maxPlayers, 7),
@@ -77,48 +84,50 @@ export const Game = {
       selectedCountry: data?.selectedCountry ?? null,
       units: data?.units,
       game_state: data?.game_state,
-      host_email: data?.host_email,
-      players: data?.players,
+      host_email: data?.host_email, // preserve if you pass it
+      players: data?.players,       // preserve if you pass it
       auto_adjudicate: data?.auto_adjudicate,
       draw_votes: data?.draw_votes,
       winners: data?.winners,
       phase_deadline: data?.phase_deadline ?? null,
     };
-    return httpRequest("/games", { method: "POST", body: payload });
+    return http("/games", { method: "POST", body: payload });
   },
 
   async update(id, patch) {
     if (!id) throw new Error("Game.update: missing id");
-    return httpRequest(`/games/${encodeURIComponent(id)}`, {
+    return http(`/games/${encodeURIComponent(id)}`, {
       method: "PATCH",
-      body: patch,
+      body: patch, // http() will JSON.stringify
     });
   },
 
   async delete(id) {
     if (!id) throw new Error("Game.delete: missing id");
-    return httpRequest(`/games/${encodeURIComponent(id)}`, { method: "DELETE" });
+    return http(`/games/${encodeURIComponent(id)}`, { method: "DELETE" });
   },
 
   async filter(q = {}) {
     const qs = new URLSearchParams(q).toString();
-    return httpRequest(`/games${qs ? `?${qs}` : ""}`);
+    return http(`/games${qs ? `?${qs}` : ""}`);
   },
 };
 
-/* ========================= GameMove ========================= */
+// ---------- GameMove ----------
 export const GameMove = {
   async filter(q) {
+    // q: { game_id, turn_number?, phase?, submitted?, source_phase?, player_email? ... }
     const { game_id, ...rest } = q || {};
     if (!game_id) throw new Error("GameMove.filter: missing game_id");
     const qs = new URLSearchParams(rest).toString();
-    return httpRequest(`/games/${encodeURIComponent(game_id)}/moves${qs ? `?${qs}` : ""}`);
+    return http(`/games/${encodeURIComponent(game_id)}/moves${qs ? `?${qs}` : ""}`);
   },
 
   async create(data) {
+    // data: { game_id, player_email, country, turn_number, phase, orders, submitted, source_phase? }
     const { game_id, ...payload } = data || {};
     if (!game_id) throw new Error("GameMove.create: missing game_id");
-    return httpRequest(`/games/${encodeURIComponent(game_id)}/moves`, {
+    return http(`/games/${encodeURIComponent(game_id)}/moves`, {
       method: "POST",
       body: payload,
     });
@@ -126,16 +135,16 @@ export const GameMove = {
 
   async update(id, patch) {
     if (!id) throw new Error("GameMove.update: missing id");
-    return httpRequest(`/moves/${encodeURIComponent(id)}`, {
+    return http(`/moves/${encodeURIComponent(id)}`, {
       method: "PATCH",
       body: patch,
     });
   },
 };
 
-/* ========================= ChatMessage ========================= */
+// ---------- ChatMessage ----------
 export const ChatMessage = {
-  // Supports optional sort & limit: ChatMessage.filter({ game_id }, "-created_date", 1)
+  // Support optional sort & limit, since you call filter({ game_id }, "-created_date", 1)
   async filter(q, sort, limit) {
     const { game_id } = q || {};
     if (!game_id) throw new Error("ChatMessage.filter: missing game_id");
@@ -143,20 +152,21 @@ export const ChatMessage = {
     if (sort) params.set("sort", sort);
     if (Number.isFinite(limit)) params.set("limit", String(limit));
     const qs = params.toString();
-    return httpRequest(`/games/${encodeURIComponent(game_id)}/chat${qs ? `?${qs}` : ""}`);
+    return http(`/games/${encodeURIComponent(game_id)}/chat${qs ? `?${qs}` : ""}`);
   },
 
   async create(data) {
+    // data: { game_id, thread_id?, thread_participants?, sender_email, sender_country, message }
     const { game_id, ...payload } = data || {};
     if (!game_id) throw new Error("ChatMessage.create: missing game_id");
-    return httpRequest(`/games/${encodeURIComponent(game_id)}/chat`, {
+    return http(`/games/${encodeURIComponent(game_id)}/chat`, {
       method: "POST",
       body: payload,
     });
   },
 };
 
-/* ========================= helpers ========================= */
+// ---------- helpers ----------
 function toNum(v, d) {
   const n = Number(v);
   return Number.isFinite(n) ? n : d;
