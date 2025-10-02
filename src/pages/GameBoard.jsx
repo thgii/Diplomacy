@@ -193,7 +193,7 @@ const isMine = (m, u) =>
       return;
     }
 
-    const lastReadTs = getLastReadTs(gid, user);
+    const lastReadTs = getLastReadTs(gid, u);
 
     // Seed baseline on first in-game load (prevents first-load dot)
     // No last-read recorded: treat any foreign message as unread
@@ -222,8 +222,64 @@ if (!lastReadTs) {
     ? toMs(chatMessages[chatMessages.length - 1])
     : Date.now();
 
-  setLastReadTs(gid, u, latestAnyTs);
+  setLastReadTs(gid, user, latestAnyTs);
 };
+// --- Chat polling: every 30s when chat is closed and tab is visible ---
+const chatPollTimerRef = useRef(null);
+const chatFetchInFlight = useRef(false);
+
+useEffect(() => {
+  // Don't poll while the chat panel is open
+  if (showChat) return;
+
+  // Need a valid game + user to poll meaningfully
+  const gid = typeof effectiveId === "function" ? effectiveId() : game?.id;
+  if (!gid || !user) return;
+
+  // Only poll when page is visible
+ const tick = async () => {
+  if (chatFetchInFlight.current) return;
+  if (typeof document !== "undefined" && document.visibilityState !== "visible") return;
+  chatFetchInFlight.current = true;
+  try {
+    await loadChatMessages();
+  } finally {
+    chatFetchInFlight.current = false;
+  }
+};
+
+
+  // Immediate fetch when polling starts/resumes
+  tick();
+
+  // 30s interval
+  chatPollTimerRef.current = setInterval(tick, 30000);
+
+  return () => {
+    if (chatPollTimerRef.current) {
+      clearInterval(chatPollTimerRef.current);
+      chatPollTimerRef.current = null;
+    }
+  };
+}, [showChat, loadChatMessages, user?.id, user?.email, effectiveGameId, effectiveId]);
+
+// Refresh chat when window gains focus or tab becomes visible
+useEffect(() => {
+  const onFocus = () => {
+    if (!showChat) loadChatMessages();
+  };
+  const onVis = () => {
+    if (typeof document !== "undefined" && document.visibilityState === "visible" && !showChat) {
+      loadChatMessages();
+    }
+  };
+  window.addEventListener("focus", onFocus);
+  document.addEventListener("visibilitychange", onVis);
+  return () => {
+    window.removeEventListener("focus", onFocus);
+    document.removeEventListener("visibilitychange", onVis);
+  };
+}, [showChat, loadChatMessages]);
 
 
   /* ------------------------------- data load ------------------------------- */
