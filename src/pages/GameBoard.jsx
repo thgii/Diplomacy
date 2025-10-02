@@ -161,14 +161,17 @@ const isMine = (m, u) =>
 
   /* --------------------------------- chat --------------------------------- */
 
-  const loadChatMessages = useCallback(async () => {
-  try {
-    const gid = effectiveId();
-    if (!gid || !user) {
-      setChatMessages([]);
-      setHasUnreadMessages(false);
-      return;
-    }
+  const loadChatMessages = useCallback(
+  async (gidOverride, userOverride) => {
+    try {
+      const gid = gidOverride ?? effectiveId();
+      const u = userOverride ?? user;
+      if (!gid || !u) {
+        setChatMessages([]);
+        setHasUnreadMessages(false);
+        return;
+      }
+
 
     const msgs = await ChatMessage.filter({ game_id: gid });
     const sorted = [...(msgs || [])].sort((a, b) => toMs(a) - toMs(b));
@@ -181,7 +184,7 @@ const isMine = (m, u) =>
 
     // Latest message FROM SOMEONE ELSE
     const latestForeignTs = sorted.reduce((acc, m) => {
-      return isMine(m, user) ? acc : Math.max(acc, toMs(m));
+      return isMine(m, u) ? acc : Math.max(acc, toMs(m));
     }, 0);
 
     // If there are no foreign messages, there's nothing unread
@@ -193,11 +196,12 @@ const isMine = (m, u) =>
     const lastReadTs = getLastReadTs(gid, user);
 
     // Seed baseline on first in-game load (prevents first-load dot)
-    if (!lastReadTs) {
-      setLastReadTs(gid, user, latestForeignTs);
-      setHasUnreadMessages(false);
-      return;
-    }
+    // No last-read recorded: treat any foreign message as unread
+if (!lastReadTs) {
+  setHasUnreadMessages(Boolean(latestForeignTs));
+  return;
+}
+
 
     setHasUnreadMessages(latestForeignTs > lastReadTs);
   } catch (e) {
@@ -218,7 +222,7 @@ const isMine = (m, u) =>
     ? toMs(chatMessages[chatMessages.length - 1])
     : Date.now();
 
-  setLastReadTs(gid, user, latestAnyTs);
+  setLastReadTs(gid, u, latestAnyTs);
 };
 
 
@@ -305,7 +309,7 @@ const isMine = (m, u) =>
         setIsSubmitted(!!move.submitted);
       }
 
-      await loadChatMessages();
+      await loadChatMessages(currentGame.id, currentUser);
       setLoading(false);
     } catch (err) {
       console.error("Error loading game data:", err);
@@ -314,9 +318,8 @@ const isMine = (m, u) =>
   }, [effectiveId, loadChatMessages]);
 
   useEffect(() => {
-    loadGameData();
-    loadChatMessages();
-  }, [effectiveGameId, loadGameData, loadChatMessages]);
+  loadGameData();
+}, [effectiveGameId, loadGameData]);
 
   /* ---------------------------- order handlers ---------------------------- */
 
@@ -996,7 +999,9 @@ const isMine = (m, u) =>
             <Button variant="outline" onClick={handleOpenChat} className="relative text-xs md:text-sm" size="sm">
               <MessageSquare className="w-3 h-3 md:w-4 md:h-4 mr-1 md:mr-2" />
               <span className="hidden sm:inline">Chat</span>
-              {hasUnreadMessages && <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></div>}
+              {hasUnreadMessages === true && (
+  <div className="absolute -top-1 -right-1 w-2 h-2 bg-red-500 rounded-full"></div>
+)}
             </Button>
             <Button
               variant="outline"
