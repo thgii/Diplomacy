@@ -15,9 +15,9 @@ export default function App() {
         <Route element={<Layout />}>
           {/* default route -> /GameLobby */}
           <Route path="/" element={<Navigate to="/GameLobby" replace />} />
-          <Route path="/GameLobby" element={<GameLobby />} />
-          <Route path="/GameBoard" element={<GameBoard />} />
-          <Route path="/GameAdmin" element={<GameAdmin />} />
+          <Route path="/gamelobby" element={<GameLobby />} />
+          <Route path="/gameboard" element={<GameBoard />} />
+          <Route path="/gameadmin" element={<GameAdmin />} />
           {/* Catch-all */}
           <Route path="*" element={<Navigate to="/GameLobby" replace />} />
         </Route>

@@ -101,7 +101,7 @@ export default function Layout() {                           // <-- no children/
             </SidebarGroup>
 
             {/* Admin link only on GameBoard */}
-            {location.pathname.includes("GameBoard") && (
+            {location.pathname.toLowerCase().includes("/gameboard") && (
               <SidebarGroup>
                 <SidebarGroupLabel className="text-xs font-semibold text-slate-500 uppercase tracking-wider px-3 py-3">
                   Admin Tools
@@ -114,10 +114,10 @@ export default function Layout() {                           // <-- no children/
                         className="hover:bg-amber-50 hover:text-amber-700 transition-all duration-200 rounded-xl mb-1 text-slate-700"
                       >
                         <Link
-                          to={createPageUrl(
-                            `GameAdmin?gameId=${new URLSearchParams(window.location.search).get("gameId")}`
-                          )}
-                          className="flex items-center gap-3 px-4 py-3"
+                         to={createPageUrl("GameAdmin", {
+                          gameId: new URLSearchParams(window.location.search).get("gameId"),
+                         })}
+                         className="flex items-center gap-3 px-4 py-3"
                         >
                           <Settings className="w-5 h-5" />
                           <span className="font-medium">Game Admin</span>
