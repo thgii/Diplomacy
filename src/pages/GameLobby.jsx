@@ -143,6 +143,7 @@ export default function GameLobby() {
       const newGame = await Game.create({
         name: gameData.name, // Explicitly passed from gameData
         host_email: user.email,
+        host_id: user.id
         max_players: 7, // Always 7 players
         turn_length_hours: gameData.turn_length_hours, // Explicitly passed from gameData
         auto_adjudicate: gameData.auto_adjudicate, // Explicitly passed from gameData

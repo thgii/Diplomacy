@@ -156,6 +156,8 @@ export default function GameAdmin() {
     loadGameData();
   }, [gameId, loadGameData]);
 
+  const isAdmin = user?.role === "admin";
+
   const isGameHost = () => {
     return user && game && game.host_email === user.email;
   };
@@ -369,13 +371,13 @@ export default function GameAdmin() {
     );
   }
 
-  if (!game || !isGameHost()) {
+  if (!game || !(isAdmin || isGameHost())) {
     return (
       <div className="p-8 flex items-center justify-center min-h-screen">
         <Card className="text-center p-8">
           <CardContent>
             <h2 className="text-xl font-semibold text-slate-700 mb-4">Access Denied</h2>
-            <p className="text-slate-500 mb-6">Only the game host can access admin controls.</p>
+            <p className="text-slate-500 mb-6">Only the game host or an admin can access admin controls.</p>
             <Link to={createPageUrl("GameLobby")}>
               <Button>Return to Lobby</Button>
             </Link>

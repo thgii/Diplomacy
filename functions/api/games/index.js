@@ -34,16 +34,17 @@ export async function onRequestPost({ request, env }) {
   const current_turn = 0; // keep your app's convention
   const current_phase = "Spring-1901-Moves"; // keep your app's convention
   const status = "waiting";
+  const host_id = (body.host_id || null);
   const host_email = (body.host_email || "").toString() || null;
 
   await env.DB.prepare(
     `INSERT INTO games (
-      id, name, host_email, status, max_players,
+      id, name, host_email, host_id, status, max_players,
       turn_length_hours, retreat_length_hours, random_assignment,
       players, current_turn, current_phase, game_state, phase_deadline
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
-    id, name, host_email, status, max_players,
+    id, name, host_email, host_id, status, max_players,
     turn_length_hours, retreat_length_hours, random_assignment ? 1 : 0,
     JSON.stringify(players), current_turn, current_phase,
     JSON.stringify(normalized_game_state), phase_deadline
@@ -64,6 +65,7 @@ async function ensureGamesTable(env) {
       id TEXT PRIMARY KEY,
       name TEXT NOT NULL,
       host_email TEXT,
+      host_id TEXT,
       status TEXT NOT NULL,
       max_players INTEGER,
       turn_length_hours INTEGER,
