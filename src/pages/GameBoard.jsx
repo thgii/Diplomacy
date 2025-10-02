@@ -169,7 +169,13 @@ setChatMessages(sorted);
 const newestRaw = lastMsg?.created_date ?? lastMsg?.created_at ?? lastMsg?.createdAt ?? lastMsg?.timestamp ?? lastMsg?.time ?? lastMsg?.sentAt;
 const newest = newestRaw ?? new Date().toISOString();
 try {
-  localStorage.setItem(`lastRead_${gid}`, newest);
+  const key = `chat:lastRead:${gid}:${user?.id ?? user?.email}`;
+let map = {};
+try { map = JSON.parse(localStorage.getItem(key) || "{}"); } catch {}
+const newestMs = new Date(newest).getTime();
+map.__all__ = Math.max(Number(map.__all__ || 0), newestMs);
+try { localStorage.setItem(key, JSON.stringify(map)); } catch {}
+
 } catch {}
 
   };

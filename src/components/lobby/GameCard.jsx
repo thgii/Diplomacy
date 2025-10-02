@@ -94,44 +94,62 @@ export default function GameCard({ game, onJoin, onDelete, user, getCountryColor
 
 
   // Check if game has changed since last visit
-  const hasGameChanged = () => {
-    if (type !== "my-game") return { phase: false, messages: false };
-    
-    try {
-      const lastGameStates = JSON.parse(localStorage.getItem('lastGameStates') || '{}');
-      const lastState = lastGameStates[game.id];
-      
-      if (!lastState) return { phase: true, messages: false }; // First time seeing this game
-      
-      let phaseChanged = false;
-      let messagesChanged = false;
-      
-      // Check for phase/turn changes
-      if (lastState.phase !== game.current_phase || lastState.turn !== game.current_turn) {
-        phaseChanged = true;
-      }
-      
-      // Check for status changes
-      if (lastState.status !== game.status) {
-        phaseChanged = true;
-      }
-      
-      // Check for new messages by comparing with chat read state
-      if (lastState.lastMessageTime) {
-        const lastReadTimestamp = localStorage.getItem(`lastRead_${game.id}`);
-        // Only mark messagesChanged if there's no lastReadTimestamp OR
-        // the last message in the game is newer than the last time the user read messages.
-        if (!lastReadTimestamp || new Date(lastState.lastMessageTime) > new Date(lastReadTimestamp)) {
-          messagesChanged = true;
-        }
-      }
-      
-      return { phase: phaseChanged, messages: messagesChanged };
-    } catch (error) {
-      console.error("Error parsing last game states from localStorage:", error);
-      return { phase: false, messages: false }; // If there's an error parsing, don't show indicators
+const hasGameChanged = () => {
+  // Only show change pills on "my-game" cards
+  if (type !== "my-game") return { phase: false, messages: false };
+
+  try {
+    const lastGameStates = JSON.parse(localStorage.getItem("lastGameStates") || "{}");
+    const lastState = lastGameStates?.[game.id];
+
+    // First time seeing this game: surface "Updated" if you want,
+    // but don't show phantom "New Messages".
+    if (!lastState) return { phase: true, messages: false };
+
+    let phaseChanged = false;
+    let messagesChanged = false;
+
+    // Phase/turn/status checks
+    if (
+      lastState.phase !== game.current_phase ||
+      lastState.turn !== game.current_turn ||
+      lastState.status !== game.status
+    ) {
+      phaseChanged = true;
     }
-  };
+
+    // Message badge: compare last message time vs. user's last read
+    if (lastState.lastMessageTime) {
+      // Read unified last-read map used by GameChat
+      let lastReadTs = 0;
+      try {
+        const lrKey = `chat:lastRead:${game.id}:${user?.id ?? user?.email}`;
+        const raw = localStorage.getItem(lrKey);
+        if (raw) {
+          const obj = JSON.parse(raw);
+          // Prefer __all__ if present; otherwise take the max across threads
+          const vals = Object.values(obj)
+            .map(Number)
+            .filter((n) => Number.isFinite(n));
+          if (vals.length) lastReadTs = Math.max(...vals);
+        }
+      } catch {
+        /* no-op */
+      }
+
+      const lastMsgTs = new Date(lastState.lastMessageTime).getTime();
+      if (!lastReadTs || lastMsgTs > lastReadTs) {
+        messagesChanged = true;
+      }
+    }
+
+    // IMPORTANT: always return a result (previous code could fall through)
+    return { phase: phaseChanged, messages: messagesChanged };
+  } catch (err) {
+    console.error("Error parsing last game states from localStorage:", err);
+    return { phase: false, messages: false };
+  }
+};
 
   const gameChanges = hasGameChanged();
 

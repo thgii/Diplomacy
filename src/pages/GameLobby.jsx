@@ -60,8 +60,12 @@ export default function GameLobby() {
       // Fetch latest message for each user game concurrently
       const gameMessagePromises = userGames.map(async (game) => {
         try {
-            const latestMessages = await ChatMessage.filter({ game_id: game.id });
-            return { gameId: game.id, latestMessageTime: latestMessages.length > 0 ? latestMessages[0].created_date : null };
+            const msgs = await ChatMessage.filter({ game_id: game.id });
+            // API returns oldest→newest, so the latest is the last element
+            const last = msgs.length ? msgs[msgs.length - 1] : null;
+            const latestMessageTime =
+              last?.created_date ?? last?.created_at ?? null;
+            return { gameId: game.id, latestMessageTime };
         } catch (error) {
             console.error(`Error fetching messages for game ${game.id}:`, error);
             return { gameId: game.id, latestMessageTime: null }; // Return null on error
@@ -94,7 +98,26 @@ export default function GameLobby() {
           }
         }
         // If there's no previous state, we don't automatically mark it as changed based on existing messages.
-        // It will be marked as changed when a new update (including a new message) occurs *after* this load.
+          // Seed baseline "last read" on the user's very first lobby load for this game.
+  // This prevents a phantom "New Messages" badge when there is historical chat.
+  if (!prevGameState && currentMessageTime) {
+    try {
+      const readerId = (currentUser?.id ?? currentUser?.email ?? "").toString();
+      if (readerId) {
+        const lrKey = `chat:lastRead:${game.id}:${readerId}`;
+        let obj = {};
+        try { obj = JSON.parse(localStorage.getItem(lrKey) || "{}"); } catch {}
+        const curMs = new Date(currentMessageTime).getTime();
+        obj.__all__ = Math.max(Number(obj.__all__ || 0), curMs);
+        localStorage.setItem(lrKey, JSON.stringify(obj));
+      }
+    } catch {
+      // no-op; keep lobby resilient
+    }
+  }
+        
+
+// It will be marked as changed when a new update (including a new message) occurs *after* this load.
         
         // Store current state for future comparison
         newGameStates[game.id] = {
