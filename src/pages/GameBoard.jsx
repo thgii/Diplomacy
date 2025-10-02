@@ -122,63 +122,105 @@ export default function GameBoard() {
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
+// --- Chat unread helpers (localStorage) ---
+const lrKey = (gameId, u) => `chat:lastRead:${gameId}:${u?.id ?? u?.email}`;
+
+const getLastReadTs = (gameId, u) => {
+  try {
+    const raw = localStorage.getItem(lrKey(gameId, u));
+    if (!raw) return 0;
+    const obj = JSON.parse(raw);
+    const vals = Object.values(obj).map(Number).filter(Number.isFinite);
+    return vals.length ? Math.max(...vals) : 0;
+  } catch { return 0; }
+};
+
+const setLastReadTs = (gameId, u, ts) => {
+  try {
+    const key = lrKey(gameId, u);
+    const obj = JSON.parse(localStorage.getItem(key) || "{}");
+    obj.__all__ = Math.max(Number(obj.__all__ || 0), Number(ts || 0));
+    localStorage.setItem(key, JSON.stringify(obj));
+  } catch {}
+};
+
+const toMs = (m) => {
+  const v = m?.created_date ?? m?.created_at ?? m?.createdAt ?? m?.timestamp ?? m?.time ?? m?.sentAt;
+  if (v == null) return 0;
+  if (typeof v === "number") return v > 1e12 ? v : v * 1000;
+  const d = new Date(v);
+  return Number.isNaN(d.getTime()) ? 0 : d.getTime();
+};
+
+const isMine = (m, u) =>
+  m.user_id === u?.id ||
+  m.userId === u?.id ||
+  m.sender_id === u?.id ||
+  m.sender_email === u?.email ||
+  m.email === u?.email;
+
   /* --------------------------------- chat --------------------------------- */
 
   const loadChatMessages = useCallback(async () => {
-    try {
-      const gid = effectiveId();
-      if (!gid) return;
-      const msgs = await ChatMessage.filter({ game_id: gid });
-const ts = (m) => {
-  const v = m.created_date ?? m.created_at ?? m.createdAt ?? m.timestamp ?? m.time ?? m.sentAt;
-  if (v == null) return 0;
-  if (typeof v === "number") return v > 1e12 ? v : v * 1000;
-  const asDate = new Date(v);
-  if (!Number.isNaN(asDate.getTime())) return asDate.getTime();
-  const asNum = Number(v);
-  if (Number.isFinite(asNum)) return asNum > 1e12 ? asNum : asNum * 1000;
-  return 0;
-};
-const sorted = [...(msgs || [])].sort((a, b) => ts(a) - ts(b));
-setChatMessages(sorted);
-
-
-      const lastReadKey = `lastRead_${gid}`;
-      const lastRead = typeof window !== "undefined" ? localStorage.getItem(lastReadKey) : null;
-      if (!sorted.length) {
-        setHasUnreadMessages(false);
-        return;
-      }
-      if (!lastRead) {
-        setHasUnreadMessages(true);
-        return;
-      }
-      const newest = sorted[sorted.length - 1].created_date;
-      setHasUnreadMessages(new Date(newest) > new Date(lastRead));
-    } catch (e) {
-      console.error("Error loading chat messages:", e);
+  try {
+    const gid = effectiveId();
+    if (!gid || !user) {
+      setChatMessages([]);
+      setHasUnreadMessages(false);
+      return;
     }
-  }, [effectiveId]);
+
+    const msgs = await ChatMessage.filter({ game_id: gid });
+    const sorted = [...(msgs || [])].sort((a, b) => toMs(a) - toMs(b));
+    setChatMessages(sorted);
+
+    if (!sorted.length) {
+      setHasUnreadMessages(false);
+      return;
+    }
+
+    // Latest message FROM SOMEONE ELSE
+    const latestForeignTs = sorted.reduce((acc, m) => {
+      return isMine(m, user) ? acc : Math.max(acc, toMs(m));
+    }, 0);
+
+    // If there are no foreign messages, there's nothing unread
+    if (!latestForeignTs) {
+      setHasUnreadMessages(false);
+      return;
+    }
+
+    const lastReadTs = getLastReadTs(gid, user);
+
+    // Seed baseline on first in-game load (prevents first-load dot)
+    if (!lastReadTs) {
+      setLastReadTs(gid, user, latestForeignTs);
+      setHasUnreadMessages(false);
+      return;
+    }
+
+    setHasUnreadMessages(latestForeignTs > lastReadTs);
+  } catch (e) {
+    console.error("Error loading chat messages:", e);
+  }
+}, [effectiveId, user?.id, user?.email]);
+
 
   const handleOpenChat = () => {
-    setShowChat(true);
-    setHasUnreadMessages(false);
-    const gid = effectiveId();
-    if (!gid) return;
-    const lastMsg = chatMessages[chatMessages.length - 1];
-const newestRaw = lastMsg?.created_date ?? lastMsg?.created_at ?? lastMsg?.createdAt ?? lastMsg?.timestamp ?? lastMsg?.time ?? lastMsg?.sentAt;
-const newest = newestRaw ?? new Date().toISOString();
-try {
-  const key = `chat:lastRead:${gid}:${user?.id ?? user?.email}`;
-let map = {};
-try { map = JSON.parse(localStorage.getItem(key) || "{}"); } catch {}
-const newestMs = new Date(newest).getTime();
-map.__all__ = Math.max(Number(map.__all__ || 0), newestMs);
-try { localStorage.setItem(key, JSON.stringify(map)); } catch {}
+  setShowChat(true);
+  setHasUnreadMessages(false);
 
-} catch {}
+  const gid = effectiveId();
+  if (!gid) return;
 
-  };
+  // Mark everything up to now as read (any author)
+  const latestAnyTs = Array.isArray(chatMessages) && chatMessages.length
+    ? toMs(chatMessages[chatMessages.length - 1])
+    : Date.now();
+
+  setLastReadTs(gid, user, latestAnyTs);
+};
+
 
   /* ------------------------------- data load ------------------------------- */
 
@@ -1076,6 +1118,9 @@ try { localStorage.setItem(key, JSON.stringify(map)); } catch {}
                   sender_country: userCountry,
                   message,
                 });
+	        // Mark my own send as read so the badge doesn't light on myself
+                setLastReadTs(gid, user, Date.now());
+                setHasUnreadMessages(false);
                 loadChatMessages();
               } catch (error) {
                 console.error("Error sending message:", error);
