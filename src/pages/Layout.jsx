@@ -77,7 +77,7 @@ export default function Layout() {                           // <-- no children/
                 <Crown className="w-6 h-6 text-yellow-400" />
               </div>
               <div>
-                <h2 className="font-bold text-xl text-slate-900">Diplomacy</h2>
+                <h2 className="font-bold text-xl text-slate-900">Statecraft</h2>
                 <p className="text-sm text-slate-500">Strategic Warfare</p>
               </div>
             </div>
@@ -189,7 +189,7 @@ export default function Layout() {                           // <-- no children/
           <header className="bg-white border-b border-slate-200 px-6 py-4 md:hidden">
             <div className="flex items-center gap-4">
               <SidebarTrigger className="hover:bg-slate-100 p-2 rounded-xl transition-colors duration-200" />
-              <h1 className="text-xl font-bold text-slate-900">Diplomacy</h1>
+              <h1 className="text-xl font-bold text-slate-900">Statecraft</h1>
             </div>
           </header>
 
