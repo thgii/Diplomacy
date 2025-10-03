@@ -745,16 +745,16 @@ export default function DiplomacyMap({
           >
             <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 100" preserveAspectRatio="none">
               <defs>
-                <marker id="move-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
-                  <polygon points="0 0, 10 5, 0 10" fill="#f87171" />
-                </marker>
-                <marker id="support-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
-                  <polygon points="0 0, 10 5, 0 10" fill="#fbbf24" />
-                </marker>
-                <marker id="retreat-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="4" markerHeight="4" orient="auto-start-reverse">
+                <marker id="move-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="2" markerHeight="2" orient="auto-start-reverse">
                   <polygon points="0 0, 10 5, 0 10" fill="#22c55e" />
                 </marker>
-                <marker id="convoy-arrowhead" markerWidth="4" markerHeight="2.5" refX="3" refY="1.25" orient="auto">
+                <marker id="support-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="2" markerHeight="2" orient="auto-start-reverse">
+                  <polygon points="0 0, 10 5, 0 10" fill="#fbbf24" />
+                </marker>
+                <marker id="retreat-arrowhead" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="2" markerHeight="2" orient="auto-start-reverse">
+                  <polygon points="0 0, 10 5, 0 10" fill="#22c55e" />
+                </marker>
+                <marker id="convoy-arrowhead" markerWidth="2" markerHeight="1.5" refX="3" refY="1.25" orient="auto">
                   <polygon points="0 0, 4 1.25, 0 2.5" fill="#8b5cf6" />
                 </marker>
 
@@ -1014,7 +1014,7 @@ export default function DiplomacyMap({
                     } else if (isConvoy) {
                       color = "#8b5cf6";
                     } else if (order.action === "move") {
-                      color = "#f87171";
+                      color = "#22c55e";
                     } else {
                       color = "#22c55e";
                     }
