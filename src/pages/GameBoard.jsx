@@ -22,6 +22,17 @@ import { territories, initialUnits } from "../components/game/mapData";
 // strip client temp suffixes like "-1758730630474"
 const stripTempSuffix = (id) => (typeof id === "string" ? id.replace(/-\d{13,}$/, "") : id);
 // normalize province casing (e.g., "spa/SC" -> "SPA/sc")
+// Map any incoming id (index "2" or string) to the unit's canonical id
+const toCanonicalUnitId = (unitId, unitsRef) => {
+  const raw = String(unitId);
+  const clean = stripTempSuffix(raw);
+  if (/^\d+$/.test(clean)) {
+    const idx = Number(clean);
+    const u = (unitsRef || [])[idx];
+    if (u && u.id) return String(u.id).toUpperCase();
+  }
+  return String(clean).toUpperCase();
+};
 const normProv = (s) => {
   if (typeof s !== "string") return s;
   const t = s.trim();
@@ -336,7 +347,7 @@ useEffect(() => {
       }
 
       setGame(currentGame);
-      setUnits(currentGame.game_state?.units || initialUnits || []);
+      setUnits(ensureUniqueUnitIds(currentGame.game_state?.units || initialUnits || []));
       setLastTurnResults(currentGame.game_state?.last_turn_results || null);
 
       // reset local order state on load
@@ -358,11 +369,43 @@ useEffect(() => {
 
       const savedMoves = await GameMove.filter(filter);
       if (savedMoves.length > 0 && savedMoves[0]) {
-        const move = savedMoves[0];
-        setOrders(move.orders || {});
-        setWinterActions(move.winter_actions || []);
-        setRetreatOrders(move.retreat_orders || {});
-        setIsSubmitted(!!move.submitted);
+  const move = savedMoves[0];
+
+  // move.orders might be an array or an object; normalize to object keyed by canonical unit_id
+  const incoming = move.orders || {};
+  const arr = Array.isArray(incoming) ? incoming : Object.values(incoming);
+
+  const canonicalized = {};
+  for (const o of arr) {
+    if (!o) continue;
+    const id = toCanonicalUnitId(o.unit_id ?? o.unit?.id ?? o.id, currentGame.game_state?.units || []);
+    if (!id) continue;
+    canonicalized[id] = {
+      ...o,
+      unit_id: id,
+      territory: normProv(o.territory),
+      target: normProv(o.target),
+      target_of_support: normProv(o.target_of_support),
+      convoy_destination: normProv(o.convoy_destination),
+    };
+  }
+
+  setOrders(canonicalized);
+ setWinterActions(move.winter_actions || []);
+ // Canonicalize saved retreat orders (object keyed by unit_id or array)
+ {
+   const rIncoming = move.retreat_orders || {};
+   const rArr = Array.isArray(rIncoming) ? rIncoming : Object.values(rIncoming);
+   const rCanon = {};
+   for (const r of rArr) {
+     if (!r) continue;
+     const id = toCanonicalUnitId(r.unit_id ?? r.unit?.id ?? r.id, currentGame.game_state?.units || []);
+     if (!id) continue;
+     rCanon[id] = { ...r, unit_id: id, target: normProv(r.target) };
+   }
+   setRetreatOrders(rCanon);
+}
+          setIsSubmitted(!!move.submitted);
       }
 
       await loadChatMessages(currentGame.id, currentUser);
@@ -380,54 +423,59 @@ useEffect(() => {
   /* ---------------------------- order handlers ---------------------------- */
 
   const handleSetOrder = (unitId, order) => {
-    const safeId = stripTempSuffix(String(unitId));
-    if (!order || !order.action) {
-      setOrders((prev) => {
-        const next = { ...prev };
-        delete next[safeId];
-        return next;
-      });
-      return;
-    }
-    setOrders((prev) => ({
-      ...prev,
-      [safeId]: {
-        ...order,
-        unit_id: safeId,
-        territory: normProv(order.territory),
-        target: normProv(order.target),
-        target_of_support: normProv(order.target_of_support),
-        convoy_destination: normProv(order.convoy_destination),
-      },
-    }));
-  };
-
-  const handleSetRetreatOrder = (unitId, order) => {
-    if (!order || !order.action) {
-      setRetreatOrders((prev) => {
-        const next = { ...prev };
-        delete next[unitId];
-        return next;
-      });
-      return;
-    }
-    setRetreatOrders((prev) => ({
-      ...prev,
-      [String(unitId)]: {
-        ...order,
-        unit_id: String(unitId),
-        target: normProv(order.target),
-      },
-    }));
-  };
-
-  const handleDeleteOrder = (unitId) => {
+  const canonicalId = toCanonicalUnitId(unitId, units);
+  if (!order || !order.action) {
     setOrders((prev) => {
       const next = { ...prev };
-      delete next[unitId];
+      delete next[canonicalId];
       return next;
     });
-  };
+    return;
+  }
+  setOrders((prev) => ({
+    ...prev,
+    [canonicalId]: {
+      ...order,
+      unit_id: canonicalId,
+      territory: normProv(order.territory),
+      target: normProv(order.target),
+      target_of_support: normProv(order.target_of_support),
+      convoy_destination: normProv(order.convoy_destination),
+    },
+  }));
+};
+
+
+  const handleSetRetreatOrder = (unitId, order) => {
+  const canonicalId = toCanonicalUnitId(unitId, units);
+  if (!order || !order.action) {
+    setRetreatOrders((prev) => {
+      const next = { ...prev };
+      delete next[canonicalId];
+      return next;
+    });
+    return;
+  }
+  setRetreatOrders((prev) => ({
+    ...prev,
+    [canonicalId]: {
+      ...order,
+      unit_id: canonicalId,
+      target: normProv(order.target),
+    },
+  }));
+};
+
+
+
+  const handleDeleteOrder = (unitId) => {
+   const canonicalId = toCanonicalUnitId(unitId, units);
+   setOrders((prev) => {
+     const next = { ...prev };
+     delete next[canonicalId];
+     return next;
+   });
+ };
 
   /* ----------------------------- save / submit ---------------------------- */
 
@@ -487,6 +535,15 @@ useEffect(() => {
           .filter((o) => !!o.action);
       }
 
+// Ensure one order per unit_id (latest wins)
+ if (Array.isArray(formattedOrders)) {
+   const map = new Map();
+   for (const o of formattedOrders) {
+     if (!o || !o.unit_id) continue;
+     map.set(String(o.unit_id).toUpperCase(), o);
+   }
+   formattedOrders = Array.from(map.values());
+ }
       const filter = {
         game_id: gid,
         player_email: user.email,
