@@ -155,12 +155,12 @@ export default function Layout() {                           // <-- no children/
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 bg-gradient-to-br from-slate-200 to-slate-300 rounded-full flex items-center justify-center">
                   <span className="text-slate-700 font-semibold text-sm">
-                    {(user?.full_name || "Diplomat").charAt(0)}
+                    {(user?.nickname ? user.nickname.charAt(0).toUpperCase() : "D")}
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-900 text-sm truncate">
-                    {user?.full_name || "Diplomat"}
+                    {user?.nickname || "Diplomat"}
                   </p>
                   <p className="text-xs text-slate-500 truncate">
                     {isAdmin ? "Administrator" : "Strategic Player"}
