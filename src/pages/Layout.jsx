@@ -164,7 +164,7 @@ export default function Layout() {                           // <-- no children/
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 bg-gradient-to-br from-slate-200 to-slate-300 rounded-full flex items-center justify-center">
                   <span className="text-slate-700 font-semibold text-sm">
-                    {(user?.nickname?.[0] || "P").toUpperCase()} : "D")}
+                    {(user?.nickname?.[0] || "D").toUpperCase()}
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
