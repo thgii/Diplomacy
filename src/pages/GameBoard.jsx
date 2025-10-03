@@ -537,15 +537,39 @@ setIsSubmitted(false);
           .filter((o) => !!o.action);
       }
 
-// Ensure one order per unit_id (latest wins)
- if (Array.isArray(formattedOrders)) {
-   const map = new Map();
-   for (const o of formattedOrders) {
-     if (!o || !o.unit_id) continue;
-     map.set(String(o.unit_id).toUpperCase(), o);
-   }
-   formattedOrders = Array.from(map.values());
- }
+// Ensure one logical order per key (latest wins)
+const keyFor = (o) => {
+  if (!o || !o.action) return null;
+  const action = String(o.action).toLowerCase();
+
+  switch (action) {
+    case "build":
+      // builds keyed by location + unit type
+      return `build:${normProv(o.territory)}:${String(o.unit_type || "").toLowerCase()}`;
+
+    case "disband":
+      // disbands keyed by the unit being disbanded
+      return `disband:${String(o.unit_id || "").toUpperCase()}`;
+
+    case "retreat":
+      return `retreat:${String(o.unit_id || "").toUpperCase()}`;
+
+    default:
+      // move/hold/support/convoy → one per unit
+      return `${action}:${String(o.unit_id || "").toUpperCase()}`;
+  }
+};
+
+if (Array.isArray(formattedOrders)) {
+  const map = new Map();
+  for (const o of formattedOrders) {
+    const k = keyFor(o);
+    if (!k) continue;
+    map.set(k, o); // latest wins
+  }
+  formattedOrders = Array.from(map.values());
+}
+
       const filter = {
         game_id: gid,
         player_email: user.email,
