@@ -31,8 +31,17 @@ export default function Layout() {                           // <-- no children/
   // SignInGate already guarantees a user before this renders,
   // but we’ll hydrate the header avatar from localStorage.
   useEffect(() => {
-    try { setUser(User.me()); } catch { setUser(null); }
-  }, []);
+   let mounted = true;
+   (async () => {
+     try {
+       const me = await User.me();   // <-- await the async call
+       if (mounted) setUser(me);
+     } catch {
+       if (mounted) setUser(null);
+     }
+   })();
+   return () => { mounted = false; };
+ }, []);
 
   const handleLogout = async () => {
     try { await User.logout(); window.location.href = "/"; } catch (e) { console.error(e); }
@@ -155,12 +164,12 @@ export default function Layout() {                           // <-- no children/
               <div className="flex items-center gap-3">
                 <div className="w-9 h-9 bg-gradient-to-br from-slate-200 to-slate-300 rounded-full flex items-center justify-center">
                   <span className="text-slate-700 font-semibold text-sm">
-                    {(user?.nickname ? user.nickname.charAt(0).toUpperCase() : "D")}
+                    {(user?.nickname?.[0] || "P").toUpperCase()} : "D")}
                   </span>
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-900 text-sm truncate">
-                    {user?.full_name || "Diplomat"}
+                    {user?.nickname || "Diplomat"}
                   </p>
                   <p className="text-xs text-slate-500 truncate">
                     {isAdmin ? "Administrator" : "Strategic Player"}
