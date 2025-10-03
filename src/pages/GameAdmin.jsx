@@ -387,6 +387,17 @@ export default function GameAdmin() {
     );
   }
 
+const displayName = (player) => {
+  if (player.is_dummy) return "Dummy Player";
+  return (
+    player.nickname                              // if ever present on player
+    || (user && player.email === user.email && user.nickname) // current user's nickname from session
+    || player.username                           // in case you ever have this
+    || (player.email?.split?.("@")?.[0] ?? "")   // optional: show local-part as a friendlier label
+    || player.email
+  );
+};
+
   return (
     <div className="relative min-h-screen overflow-hidden"> {/* Added relative container for background */}
       {/* Background Map Image */}
@@ -534,7 +545,7 @@ export default function GameAdmin() {
                       <div>
                         <div className="font-medium">{player.country}</div>
                         <div className="text-xs text-slate-500">
-                          {player.is_dummy ? "Dummy Player" : (player.nickname || player.username || player.email)}
+                          {displayName(player)}
                         </div>
                       </div>
                       {player.email === game.host_email && (
