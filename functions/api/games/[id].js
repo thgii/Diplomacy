@@ -26,13 +26,13 @@ export async function onRequestPatch({ request, params, env }) {
     `UPDATE games SET
       name = ?, host_email = ?, status = ?, max_players = ?, turn_length_hours = ?,
       retreat_length_hours = ?, random_assignment = ?, players = ?, current_turn = ?,
-      current_phase = ?, game_state = ?, phase_deadline = ?
+      current_phase = ?, game_state = ?, phase_deadline = ?, auto_adjudicate = ?
      WHERE id = ?`
   ).bind(
     merged.name, merged.host_email, merged.status, merged.max_players, merged.turn_length_hours,
     merged.retreat_length_hours, merged.random_assignment ? 1 : 0,
     JSON.stringify(merged.players || []), merged.current_turn, merged.current_phase,
-    JSON.stringify(merged.game_state || null), merged.phase_deadline || null, id
+    JSON.stringify(merged.game_state || null), merged.phase_deadline || null, merged.auto_adjudicate ? 1 : 0, id
   ).run();
 
   return json(merged);

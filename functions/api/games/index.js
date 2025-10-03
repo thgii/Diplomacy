@@ -41,13 +41,13 @@ export async function onRequestPost({ request, env }) {
     `INSERT INTO games (
       id, name, host_email, host_id, status, max_players,
       turn_length_hours, retreat_length_hours, random_assignment,
-      players, current_turn, current_phase, game_state, phase_deadline
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      players, current_turn, current_phase, game_state, phase_deadline, auto_adjudicate
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
     id, name, host_email, host_id, status, max_players,
     turn_length_hours, retreat_length_hours, random_assignment ? 1 : 0,
     JSON.stringify(players), current_turn, current_phase,
-    JSON.stringify(normalized_game_state), phase_deadline
+    JSON.stringify(normalized_game_state), phase_deadline, (body.auto_adjudicate ? 1 : 0)
   ).run();
 
   const { results } = await env.DB

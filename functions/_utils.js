@@ -2,6 +2,7 @@ export function parseGame(row) {
   if (!row) return null;
   return {
     ...row,
+    auto_adjudicate: row.auto_adjudicate ? Boolean(Number(row.auto_adjudicate)) : false,
     players: row.players ? JSON.parse(row.players) : [],
     game_state: row.game_state ? JSON.parse(row.game_state) : null,
   };
