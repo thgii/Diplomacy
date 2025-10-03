@@ -168,6 +168,7 @@ export default function GameAdmin() {
     try {
       const updatedPlayers = [...(game.players || []), {
         email: `dummy_${Date.now()}@example.com`,
+	nickname: "Dummy Player",
         // placeholder; will be overwritten if we fill the table
         country: newPlayerData.country,
         color: getCountryColor(newPlayerData.country),

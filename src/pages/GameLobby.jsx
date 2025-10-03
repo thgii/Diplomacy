@@ -223,6 +223,7 @@ export default function GameLobby() {
 
       const newPlayer = {
         email: user.email,
+	nickname: user.nickname,
         country: assignedCountry,
         color: getCountryColor(assignedCountry),
         supply_centers: 3,
