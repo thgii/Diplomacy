@@ -726,7 +726,7 @@ export default function DiplomacyMap({
         >
           {/* Background Map Image */}
           <img
-            src="https://qtrypzzcjebvfcihiynt.supabase.co/storage/v1/object/public/base44-prod/public/d18e3cf3d_l5bhjco4kiod1.jpg"
+            src="https://i.imgur.com/Oqmczsu.jpeg"
             alt="Diplomacy Map"
             className="absolute inset-0 w-full h-full object-fill pointer-events-none"
             style={{
