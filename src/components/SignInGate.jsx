@@ -80,7 +80,7 @@ export default function SignInGate({ children }) {
           width: 360, maxWidth: "90vw", padding: 24, borderRadius: 12,
           boxShadow: "0 10px 30px rgba(0,0,0,0.15)", background: "white"
         }}>
-          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Join Diplomacy</h2>
+          <h2 style={{ margin: 0, fontSize: 22, fontWeight: 700 }}>Join Statecraft</h2>
           <p style={{ marginTop: 8, color: "#666" }}>
             Enter a nickname. If it’s new, you’ll create a 6-digit passcode. If it exists, enter its passcode to log in.
           </p>
