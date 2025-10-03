@@ -367,47 +367,75 @@ useEffect(() => {
         filter.source_phase = sourcePhase;
       }
 
-      const savedMoves = await GameMove.filter(filter);
-      if (savedMoves.length > 0 && savedMoves[0]) {
+      // --- Load saved moves for this player/turn/phase ---
+let savedMoves = await GameMove.filter(filter);
+
+// (Optional backward-compat: if DB rows were saved with `email` not `player_email`)
+if ((!savedMoves || savedMoves.length === 0) && filter.player_email) {
+  const fallback = { ...filter };
+  delete fallback.player_email;
+  fallback.email = currentUser.email;
+  savedMoves = await GameMove.filter(fallback);
+}
+
+if (savedMoves && savedMoves.length > 0) {
   const move = savedMoves[0];
 
-  // move.orders might be an array or an object; normalize to object keyed by canonical unit_id
-  const incoming = move.orders || {};
-  const arr = Array.isArray(incoming) ? incoming : Object.values(incoming);
+  // Everything is stored in move.orders (across all phases)
+  const incoming = move.orders || [];
+  const asArray = Array.isArray(incoming) ? incoming : Object.values(incoming);
 
-  const canonicalized = {};
-  for (const o of arr) {
-    if (!o) continue;
-    const id = toCanonicalUnitId(o.unit_id ?? o.unit?.id ?? o.id, currentGame.game_state?.units || []);
-    if (!id) continue;
-    canonicalized[id] = {
+  // Helper to canonicalize any order shape
+  const toCanonOrder = (o) => {
+    if (!o) return null;
+    const id = o.unit_id ?? o.unit?.id ?? o.id;
+    return {
       ...o,
-      unit_id: id,
+      unit_id: id ? toCanonicalUnitId(id, currentGame.game_state?.units || []) : undefined,
       territory: normProv(o.territory),
       target: normProv(o.target),
       target_of_support: normProv(o.target_of_support),
       convoy_destination: normProv(o.convoy_destination),
     };
+  };
+
+  if (currentGame.current_phase === "winter") {
+    // Winter: build/disband live in move.orders
+    const winter = asArray
+      .filter((o) => o && (o.action === "build" || o.action === "disband"))
+      .map((o) => toCanonOrder(o))
+      .filter(Boolean);
+
+    setWinterActions(winter);
+    setOrders({});
+    setRetreatOrders({});
+  } else if (currentGame.current_phase === "retreat") {
+    // Retreat: retreat/disband live in move.orders; UI expects object keyed by unit_id
+    const rCanon = {};
+    for (const o of asArray) {
+      if (!o || (o.action !== "retreat" && o.action !== "disband")) continue;
+      const c = toCanonOrder(o);
+      if (!c?.unit_id) continue;
+      rCanon[c.unit_id] = { ...c, unit_id: c.unit_id, target: normProv(c.target) };
+    }
+    setRetreatOrders(rCanon);
+    setOrders({});
+    setWinterActions([]);
+  } else {
+    // Spring/Fall: normal orders (move/hold/support/convoy)
+    const oCanon = {};
+    for (const o of asArray) {
+      const c = toCanonOrder(o);
+      if (!c?.unit_id) continue;
+      oCanon[c.unit_id] = c;
+    }
+    setOrders(oCanon);
+    setRetreatOrders({});
+    setWinterActions([]);
   }
 
-  setOrders(canonicalized);
- setWinterActions(move.winter_actions || []);
- // Canonicalize saved retreat orders (object keyed by unit_id or array)
- {
-   const rIncoming = move.retreat_orders || {};
-   const rArr = Array.isArray(rIncoming) ? rIncoming : Object.values(rIncoming);
-   const rCanon = {};
-   for (const r of rArr) {
-     if (!r) continue;
-     const id = toCanonicalUnitId(r.unit_id ?? r.unit?.id ?? r.id, currentGame.game_state?.units || []);
-     if (!id) continue;
-     rCanon[id] = { ...r, unit_id: id, target: normProv(r.target) };
-   }
-   setRetreatOrders(rCanon);
+  setIsSubmitted(!!move.submitted);
 }
-          setIsSubmitted(!!move.submitted);
-      }
-
       await loadChatMessages(currentGame.id, currentUser);
       setLoading(false);
     } catch (err) {
@@ -590,6 +618,7 @@ if (Array.isArray(formattedOrders)) {
       } else {
         await GameMove.create({
           game_id: gid,
+          player_email: user.email,
           email: user.email,
           country: userPlayer.country,
           turn_number: game.current_turn,
