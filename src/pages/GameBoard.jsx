@@ -507,7 +507,7 @@ useEffect(() => {
       } else {
         await GameMove.create({
           game_id: gid,
-          player_email: user.email,
+          email: user.email,
           country: userPlayer.country,
           turn_number: game.current_turn,
           phase: game.current_phase,
