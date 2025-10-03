@@ -534,7 +534,7 @@ export default function GameAdmin() {
                       <div>
                         <div className="font-medium">{player.country}</div>
                         <div className="text-xs text-slate-500">
-                          {player.is_dummy ? "AI Player" : player.email}
+                          {player.is_dummy ? "Dummy Player" : player.nickname || player.username || player.email)}
                         </div>
                       </div>
                       {player.email === game.host_email && (
@@ -600,7 +600,7 @@ export default function GameAdmin() {
                   Cancel
                 </Button>
                 <Button onClick={addDummyPlayer} disabled={!newPlayerData.country}>
-                  Add AI Player
+                  Add Dummy Player
                 </Button>
               </div>
             </div>
