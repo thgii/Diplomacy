@@ -908,7 +908,7 @@ useEffect(() => {
           game_id: effectiveId(),
           turn_number: game.current_turn,
           phase: game.current_phase,
-          submitted: true,
+          submitted: 1,
         };
 
         if (game.current_phase === "retreat") {
@@ -938,7 +938,7 @@ useEffect(() => {
           requiredPlayers = (game.players || []).filter((p) => !p.is_dummy);
         }
 
-        const submittedEmails = new Set(submittedMoves.map((m) => m.player_email));
+        const submittedEmails = new Set(submittedMoves.map((m) => m.email));
         const requiredEmails = new Set(requiredPlayers.map((p) => p.email));
         const submittedCount = [...requiredEmails].filter((e) => submittedEmails.has(e)).length;
 
