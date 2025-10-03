@@ -56,6 +56,7 @@ const formatMountainTime = (value) => {
     hour: "2-digit",
     minute: "2-digit",
     hour12: false,
+    timeZoneName: "short",
   }).formatToParts(d);
 
   const get = (t) => parts.find((p) => p.type === t)?.value;
@@ -63,7 +64,8 @@ const formatMountainTime = (value) => {
   const day = get("day");
   const hour = get("hour");
   const minute = get("minute");
-  return `${month} ${day}, ${hour}:${minute}`;
+  const tz = get("timeZoneName"); // requires timeZoneName below
+  return `${month} ${day}, ${hour}:${minute}${tz ? " " + tz : ""}`;
 };
 
 export default function GameChat({ game, user, messages, onSendMessage, onClose }) {
@@ -82,9 +84,47 @@ export default function GameChat({ game, user, messages, onSendMessage, onClose 
   );
 
   const getTimestamp = (m) => {
-    const v = m.createdAt ?? m.created_at ?? m.created_date ?? m.timestamp ?? m.time ?? m.sentAt;
-    return v ? new Date(v).getTime() : 0;
-  };
+  const v =
+    m.createdAt ??
+    m.created_at ??
+    m.created_date ??
+    m.timestamp ??
+    m.time ??
+    m.sentAt;
+
+  if (v == null) return 0;
+
+  // Numbers: seconds vs ms
+  if (typeof v === "number") {
+    return v > 1e12 ? v : v * 1000;
+  }
+
+  // Firestore/whatev timestamps like { seconds, nanoseconds }
+  if (typeof v === "object" && (v.seconds || v.nanoseconds)) {
+    const ms = (v.seconds ?? 0) * 1000 + Math.round((v.nanoseconds ?? 0) / 1e6);
+    return ms;
+  }
+
+  if (typeof v === "string") {
+    const s = v.trim();
+
+    // If no timezone info at the end (Z or ±HH:MM), treat it as UTC.
+    const hasTZ = /Z|[+-]\d{2}:?\d{2}$/.test(s);
+    if (!hasTZ) {
+      // normalize "YYYY-MM-DD HH:mm:ss" → "YYYY-MM-DDTHH:mm:ssZ"
+      const normalized = (s.includes("T") ? s : s.replace(" ", "T")) + "Z";
+      const t = Date.parse(normalized);
+      if (!Number.isNaN(t)) return t;
+    }
+
+    const t = Date.parse(s);
+    return Number.isNaN(t) ? 0 : t;
+  }
+
+  // Fallback
+  const t = new Date(v).getTime();
+  return Number.isNaN(t) ? 0 : t;
+};
 
   const getSenderId = (m) =>
     m.userId ?? m.user_id ?? m.senderId ?? m.sender_email ?? m.sender?.id ?? m.authorId;
