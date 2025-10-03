@@ -423,7 +423,8 @@ useEffect(() => {
   /* ---------------------------- order handlers ---------------------------- */
 
   const handleSetOrder = (unitId, order) => {
-  const canonicalId = toCanonicalUnitId(unitId, units);
+setIsSubmitted(false);   
+const canonicalId = toCanonicalUnitId(unitId, units);
   if (!order || !order.action) {
     setOrders((prev) => {
       const next = { ...prev };
@@ -447,6 +448,7 @@ useEffect(() => {
 
 
   const handleSetRetreatOrder = (unitId, order) => {
+setIsSubmitted(false); 
   const canonicalId = toCanonicalUnitId(unitId, units);
   if (!order || !order.action) {
     setRetreatOrders((prev) => {
