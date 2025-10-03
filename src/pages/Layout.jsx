@@ -160,7 +160,7 @@ export default function Layout() {                           // <-- no children/
                 </div>
                 <div className="flex-1 min-w-0">
                   <p className="font-semibold text-slate-900 text-sm truncate">
-                    {user?.nickname || "Diplomat"}
+                    {user?.full_name || "Diplomat"}
                   </p>
                   <p className="text-xs text-slate-500 truncate">
                     {isAdmin ? "Administrator" : "Strategic Player"}
