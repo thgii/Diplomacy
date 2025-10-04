@@ -16,11 +16,6 @@ export async function onRequestPost({ request, env }) {
   // Ensure schema exists on first write as well
   await ensureGamesTable(env);
 
-  //boolean normalizer
-  const bool = (v) => v === true || v === 1 || v === "1" || (typeof v === "string" && v.toLowerCase() === "true") || v === "on";
-  const num = (v, d=0) => (v === 0 || v) ? Number(v) : d;
-
-
   // Parse and normalize input
   const body = await request.json().catch(() => ({}));
   const name = (body.name || body.title || "New Game").toString().trim();
@@ -28,7 +23,6 @@ export async function onRequestPost({ request, env }) {
   const turn_length_hours = num(body.turn_length_hours ?? body.turnLengthHours, 24);
   const retreat_length_hours = num(body.retreat_length_hours ?? body.retreatLengthHours, 24);
   const random_assignment = bool(body.random_assignment ?? body.randomAssignment);
-  const auto_adjudicate = bool(body.auto_adjudicate ?? body.autoAdjudicate);
   const players = Array.isArray(body.players) ? body.players : [];
 
   // Always create a well-formed game_state, even if the client omits it
@@ -53,7 +47,7 @@ export async function onRequestPost({ request, env }) {
     id, name, host_email, host_id, status, max_players,
     turn_length_hours, retreat_length_hours, random_assignment ? 1 : 0,
     JSON.stringify(players), current_turn, current_phase,
-    JSON.stringify(normalized_game_state), phase_deadline, auto_adjudicate ? 1 : 0
+    JSON.stringify(normalized_game_state), phase_deadline, (body.auto_adjudicate ? 1 : 0)
   ).run();
 
   const { results } = await env.DB
@@ -77,7 +71,6 @@ async function ensureGamesTable(env) {
       turn_length_hours INTEGER,
       retreat_length_hours INTEGER,
       random_assignment INTEGER,
-      auto_adjudicate INTEGER DEFAULT 1,
       players TEXT,
       current_turn INTEGER,
       current_phase TEXT,

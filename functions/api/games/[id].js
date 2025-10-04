@@ -1,7 +1,5 @@
 import { parseGame, json } from "../../_utils.js";
 
-const bool = (v) => v === true || v === 1 || v === "1" || (typeof v === "string" && v.toLowerCase() === "true") || v === "on";
-
 export async function onRequestGet({ params, env }) {
   const { id } = params;
   const { results } = await env.DB.prepare("SELECT * FROM games WHERE id = ?").bind(id).all();
@@ -20,7 +18,6 @@ export async function onRequestPatch({ request, params, env }) {
   const merged = {
     ...current,
     ...patch,
-    auto_adjudicate: bool(patch.auto_adjudicate ?? current.auto_adjudicate) ? 1 : 0,
     players: patch.players ?? current.players,
     game_state: patch.game_state ?? current.game_state,
   };
@@ -33,9 +30,9 @@ export async function onRequestPatch({ request, params, env }) {
      WHERE id = ?`
   ).bind(
     merged.name, merged.host_email, merged.status, merged.max_players, merged.turn_length_hours,
-    merged.retreat_length_hours, merged.random_assignment ? 1 : 0, merged.auto_adjudicate,
+    merged.retreat_length_hours, merged.random_assignment ? 1 : 0,
     JSON.stringify(merged.players || []), merged.current_turn, merged.current_phase,
-    JSON.stringify(merged.game_state || null), merged.phase_deadline || null, id
+    JSON.stringify(merged.game_state || null), merged.phase_deadline || null, merged.auto_adjudicate ? 1 : 0, id
   ).run();
 
   return json(merged);
