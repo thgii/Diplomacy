@@ -1,8 +1,9 @@
+// functions/_utils.js
 export function parseGame(row) {
   if (!row) return null;
   return {
     ...row,
-    auto_adjudicate: row.auto_adjudicate ? Boolean(Number(row.auto_adjudicate)) : false,
+    auto_adjudicate: Boolean(Number(row.auto_adjudicate || 0)),
     players: row.players ? JSON.parse(row.players) : [],
     game_state: row.game_state ? JSON.parse(row.game_state) : null,
   };

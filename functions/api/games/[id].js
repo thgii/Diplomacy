@@ -1,3 +1,4 @@
+// functions/api/games/[id].js
 import { parseGame, json } from "../../_utils.js";
 
 export async function onRequestGet({ params, env }) {
@@ -18,8 +19,6 @@ export async function onRequestPatch({ request, params, env }) {
   const merged = {
     ...current,
     ...patch,
-    players: patch.players ?? current.players,
-    game_state: patch.game_state ?? current.game_state,
   };
 
   await env.DB.prepare(
@@ -29,10 +28,20 @@ export async function onRequestPatch({ request, params, env }) {
       current_phase = ?, game_state = ?, phase_deadline = ?, auto_adjudicate = ?
      WHERE id = ?`
   ).bind(
-    merged.name, merged.host_email, merged.status, merged.max_players, merged.turn_length_hours,
-    merged.retreat_length_hours, merged.random_assignment ? 1 : 0,
-    JSON.stringify(merged.players || []), merged.current_turn, merged.current_phase,
-    JSON.stringify(merged.game_state || null), merged.phase_deadline || null, merged.auto_adjudicate ? 1 : 0, id
+    merged.name,
+    merged.host_email,
+    merged.status,
+    merged.max_players,
+    merged.turn_length_hours,
+    merged.retreat_length_hours,
+    merged.random_assignment ? 1 : 0,
+    JSON.stringify(merged.players || []),
+    merged.current_turn,
+    merged.current_phase,
+    JSON.stringify(merged.game_state || null),
+    merged.phase_deadline || null,
+    merged.auto_adjudicate ? 1 : 0,
+    id
   ).run();
 
   return json(merged);

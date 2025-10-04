@@ -1,3 +1,4 @@
+// functions/api/games/[id]/moves.js
 import { json } from "../../../_utils.js";
 
 async function ensureMovesTable(env) {
@@ -5,63 +6,68 @@ async function ensureMovesTable(env) {
     CREATE TABLE IF NOT EXISTS game_moves (
       id TEXT PRIMARY KEY,
       game_id TEXT NOT NULL,
-      email TEXT,
-      country TEXT,
-      turn_number INTEGER,
-      phase TEXT,
-      source_phase TEXT,
-      orders TEXT,
-      submitted INTEGER,
+      turn INTEGER NOT NULL,
+      phase TEXT NOT NULL,
+      player_email TEXT NOT NULL,
+      orders TEXT, -- JSON
+      is_finalized INTEGER DEFAULT 0,
       created_at TEXT DEFAULT (datetime('now'))
     )
   `).run();
-  await env.DB.prepare(`CREATE INDEX IF NOT EXISTS idx_moves_game ON game_moves(game_id)`).run();
+
+  await env.DB.prepare(
+    `CREATE INDEX IF NOT EXISTS idx_moves_game_phase ON game_moves(game_id, turn, phase)`
+  ).run();
 }
 
-export async function onRequestGet({ request, params, env }) {
-  if (!env.DB) return json({ error: "DB not configured" }, 503);
+export async function onRequestGet({ params, env }) {
+  const { id } = params;
   await ensureMovesTable(env);
 
-  const { id } = params;
-  const url = new URL(request.url);
-  const q = Object.fromEntries(url.searchParams);
+  const r = await env.DB.prepare(
+    `SELECT * FROM game_moves WHERE game_id = ? ORDER BY created_at DESC`
+  ).bind(id).all();
 
-  const clauses = ["game_id = ?"];
-  const binds = [id];
-  const keys = ["turn_number","phase","source_phase","submitted","player_email","email","country"];
+  const results = (r.results || []).map((row) => ({
+    ...row,
+    orders: row.orders ? JSON.parse(row.orders) : [],
+    is_finalized: Boolean(Number(row.is_finalized || 0)),
+  }));
 
-  for (const k of keys) {
-    if (q[k] !== undefined) {
-      const col = k === "player_email" ? "email" : k;
-      clauses.push(`${col} = ?`);
-      binds.push(q[k]);
-    }
-  }
-
-  const { results } = await env.DB.prepare(
-    `SELECT * FROM game_moves WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC`
-  ).bind(...binds).all();
-
-  return json(results.map(r => ({ ...r, orders: r.orders ? JSON.parse(r.orders) : [] })));
+  return json(results);
 }
 
 export async function onRequestPost({ request, params, env }) {
-  if (!env.DB) return json({ error: "DB not configured" }, 503);
+  const { id } = params;
   await ensureMovesTable(env);
 
-  const { id } = params; // game id
-  const body = await request.json().catch(() => ({}));
-  const moveId = (globalThis.crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
+  const payload = await request.json().catch(() => ({}));
+  const {
+    player_email,
+    turn,
+    phase,
+    orders = [],
+    is_finalized = false,
+  } = payload;
+
+  const recId = globalThis.crypto?.randomUUID
+    ? crypto.randomUUID()
+    : Math.random().toString(36).slice(2);
 
   await env.DB.prepare(
-    `INSERT INTO game_moves (id, game_id, email, country, turn_number, phase, source_phase, orders, submitted)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
-  ).bind(
-    moveId, id, body.email || null, body.country || null, body.turn_number, body.phase,
-    body.source_phase || null, JSON.stringify(body.orders || []), body.submitted ? 1 : 0
-  ).run();
+    `INSERT INTO game_moves (id, game_id, turn, phase, player_email, orders, is_finalized)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`
+  )
+    .bind(
+      recId,
+      id,
+      Number(turn) || 0,
+      String(phase || "orders"),
+      String(player_email || ""),
+      JSON.stringify(orders),
+      is_finalized ? 1 : 0
+    )
+    .run();
 
-  const { results } = await env.DB.prepare("SELECT * FROM game_moves WHERE id = ?").bind(moveId).all();
-  const row = results[0];
-  return json({ ...row, orders: row.orders ? JSON.parse(row.orders) : [] }, 201);
+  return json({ id: recId });
 }
