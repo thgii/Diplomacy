@@ -215,6 +215,7 @@ export default function DiplomacyMap({
     convoyedArmy: null,
   });
   const [highlightedTerritories, setHighlightedTerritories] = useState([]);
+  const [convoyHighlightTerritories, setConvoyHighlightTerritories] = useState([]);
   const [selectedRetreatingUnit, setSelectedRetreatingUnit] = useState(null);
 
   const [unitMenu, setUnitMenu] = useState(null); // { unit, x, y }
@@ -293,10 +294,12 @@ export default function DiplomacyMap({
     setSelectedUnit(null);
     setSupportState({ step: null, supportingUnit: null, supportedUnit: null, convoyedArmy: null });
     setHighlightedTerritories([]);
+    setConvoyHighlightTerritories([]); // clear convoy-only highlights too
     setSelectedRetreatingUnit(null);
     setUnitMenu(null);
     setConvoyFlow(null);
   };
+
 
   const findConvoyRoute = (fromTerritory, toTerritory, unitsList) => {
     const userFleetsInSea = unitsList.filter(
@@ -395,98 +398,103 @@ export default function DiplomacyMap({
   const handleTerritoryClick = (e, terrId) => {
     e.stopPropagation();
     if (!userPlayer) return;
+    const tapBase = terrId ? getBaseTerritory(terrId) : null;
 
     // --- Convoy flow step 2: pick the DESTINATION ---
     if (convoyFlow?.step === "pick_destination") {
-      const destBaseTap = terrId ? getBaseTerritory(terrId) : null;
-      if (terrId && highlightedTerritories.includes(destBaseTap)) {
-        const fleet = convoyFlow.fleet;
-        const army = convoyFlow.army;
+  if (tapBase && highlightedTerritories.includes(tapBase)) {
+    const fleet = convoyFlow.fleet;
+    const army = convoyFlow.army;
 
-        onSetOrder(fleet.id, {
-          unit_id: fleet.id,
-          unit_type: "navy",
-          territory: fleet.territory,
-          action: "convoy",
-          target: army.territory,
-          convoy_destination: destBaseTap,
-        });
+    onSetOrder(fleet.id, {
+      unit_id: fleet.id,
+      unit_type: "navy",
+      territory: fleet.territory,
+      action: "convoy",
+      target: army.territory,
+      convoy_destination: tapBase,
+    });
 
-        setConvoyFlow(null);
-        resetSelection();
-        return;
-      }
-      // tap elsewhere cancels
-      setConvoyFlow(null);
-      resetSelection();
-      return;
-    }
+    setConvoyFlow(null);
+    resetSelection();
+    return;
+  }
+  // tap elsewhere cancels
+  setConvoyFlow(null);
+  resetSelection();
+  return;
+}
+
 
     // Finalizing a RETREAT order
     if (selectedRetreatingUnit) {
-      if (highlightedTerritories.includes(terrId)) {
-        onSetOrder(selectedRetreatingUnit.unit.id, {
-          unit_id: selectedRetreatingUnit.unit.id,
-          unit_type: selectedRetreatingUnit.unit.type,
-          territory: selectedRetreatingUnit.fromTerritory,
-          action: "retreat",
-          target: terrId,
-        });
-      }
-      resetSelection();
-      return;
-    }
+  if (tapBase && highlightedTerritories.includes(tapBase)) {
+    onSetOrder(selectedRetreatingUnit.unit.id, {
+      unit_id: selectedRetreatingUnit.unit.id,
+      unit_type: selectedRetreatingUnit.unit.type,
+      territory: selectedRetreatingUnit.fromTerritory,
+      action: "retreat",
+      target: tapBase,
+    });
+  }
+  resetSelection();
+  return;
+}
+
 
     // Finalizing a SUPPORT order (Step 3: selecting destination for move or hold)
     if (supportState.step === "select_support_action") {
-      const { supportingUnit, supportedUnit } = supportState;
-      if (highlightedTerritories.includes(terrId)) {
-        onSetOrder(supportingUnit.id, {
-          unit_id: supportingUnit.id,
-          unit_type: supportingUnit.type,
-          territory: supportingUnit.territory,
-          action: "support",
-          target: terrId,
-          target_of_support: supportedUnit.territory,
-        });
-      }
+  const { supportingUnit, supportedUnit } = supportState;
+  if (tapBase && highlightedTerritories.includes(tapBase)) {
+    onSetOrder(supportingUnit.id, {
+      unit_id: supportingUnit.id,
+      unit_type: supportingUnit.type,
+      territory: supportingUnit.territory,
+      action: "support",
+      target: tapBase,
+      target_of_support: supportedUnit.territory,
+    });
+  }
+  resetSelection();
+  return;
+}
+
+
+// Giving a MOVE order
+if (selectedUnit) {
+  const regularMovesRaw = getValidMoves(selectedUnit.type, selectedUnit.territory) || [];
+  const regularMovesBase = [...new Set(regularMovesRaw.map(getBaseTerritory))];
+
+  if (tapBase && regularMovesBase.includes(tapBase)) {
+    onSetOrder(selectedUnit.id, {
+      unit_id: selectedUnit.id,
+      unit_type: selectedUnit.type,
+      territory: selectedUnit.territory,
+      action: "move",
+      target: tapBase,
+    });
+    resetSelection();
+    return;
+  } else if (selectedUnit.type === "army" && tapBase) {
+    const anyRoutes = findAllConvoyRoutes(selectedUnit.territory, tapBase, units, null);
+    if (anyRoutes.length > 0) {
+      onSetOrder(selectedUnit.id, {
+        unit_id: selectedUnit.id,
+        unit_type: "army",
+        territory: selectedUnit.territory,
+        action: "move",
+        target: tapBase,
+        via_convoy: true,
+      });
       resetSelection();
       return;
     }
+  }
 
-    // Giving a MOVE order
-    if (selectedUnit) {
-      const validMoves = getValidMoves(selectedUnit.type, selectedUnit.territory);
+  resetSelection();
+  return;
+}
 
-      if (validMoves.includes(terrId)) {
-        onSetOrder(selectedUnit.id, {
-          unit_id: selectedUnit.id,
-          unit_type: selectedUnit.type,
-          territory: selectedUnit.territory,
-          action: "move",
-          target: terrId,
-        });
-        resetSelection();
-        return;
-      } else if (selectedUnit.type === "army" && terrId) {
-        const anyRoutes = findAllConvoyRoutes(selectedUnit.territory, terrId, units, null);
-        if (anyRoutes.length > 0) {
-          onSetOrder(selectedUnit.id, {
-            unit_id: selectedUnit.id,
-            unit_type: "army",
-            territory: selectedUnit.territory,
-            action: "move",
-            target: getBaseTerritory(terrId),
-            via_convoy: true,
-          });
-          resetSelection();
-          return;
-        }
-      }
-
-      resetSelection();
-      return;
-    }
 
     resetSelection();
   };
@@ -496,21 +504,24 @@ export default function DiplomacyMap({
 
     // --- Convoy flow step 1: pick the ARMY to convoy ---
     if (convoyFlow?.step === "pick_army") {
-      if (unit.type === "army" && highlightedTerritories.includes(unit.territory)) {
-        const destinations = getConvoyDestinationsViaFleet(
-          unit.territory,
-          convoyFlow.fleet.territory,
-          units
-        );
-        setHighlightedTerritories(destinations); // base ids
-        setConvoyFlow({ step: "pick_destination", fleet: convoyFlow.fleet, army: unit, destinations });
-        return;
-      }
-      // tap elsewhere cancels
-      setConvoyFlow(null);
-      resetSelection();
-      return;
-    }
+  const armyBase = getBaseTerritory(unit.territory);
+  if (unit.type === "army" && highlightedTerritories.includes(armyBase)) {
+    const destinations = getConvoyDestinationsViaFleet(
+      unit.territory,
+      convoyFlow.fleet.territory,
+      units
+    );
+    const destinationsBase = [...new Set((destinations || []).map(getBaseTerritory))];
+    setHighlightedTerritories(destinationsBase);
+    setConvoyFlow({ step: "pick_destination", fleet: convoyFlow.fleet, army: unit, destinations: destinationsBase });
+    return;
+  }
+  // tap elsewhere cancels
+  setConvoyFlow(null);
+  resetSelection();
+  return;
+}
+
 
      // Mobile-first fleet menu: only when no selection flow is active
   if (
@@ -532,7 +543,8 @@ export default function DiplomacyMap({
     if (isRetreatingUnitData && isRetreatingUnitData.unit.country === userPlayer.country) {
       resetSelection();
       setSelectedRetreatingUnit(isRetreatingUnitData);
-      setHighlightedTerritories(isRetreatingUnitData.validRetreats);
+      setHighlightedTerritories([...new Set((isRetreatingUnitData.validRetreats || []).map(getBaseTerritory))]);
+      setConvoyHighlightTerritories([]); // retreats are not convoy-based
       return;
     }
 
@@ -543,41 +555,44 @@ export default function DiplomacyMap({
 
     // Finalizing a SUPPORT order by clicking on a unit in the target territory
     if (supportState.step === "select_support_action") {
-      const { supportingUnit, supportedUnit } = supportState;
+  const { supportingUnit, supportedUnit } = supportState;
 
-      if (highlightedTerritories.includes(unit.territory)) {
-        onSetOrder(supportingUnit.id, {
-          unit_id: supportingUnit.id,
-          unit_type: supportingUnit.type,
-          territory: supportingUnit.territory,
-          action: "support",
-          target: unit.territory,
-          target_of_support: supportedUnit.territory,
-        });
+  const unitBase = getBaseTerritory(unit.territory);
+  if (highlightedTerritories.includes(unitBase)) {
+    onSetOrder(supportingUnit.id, {
+      unit_id: supportingUnit.id,
+      unit_type: supportingUnit.type,
+      territory: supportingUnit.territory,
+      action: "support",
+      target: unitBase,
+      target_of_support: supportedUnit.territory,
+    });
 
-        resetSelection();
-        return;
-      }
+    resetSelection();
+    return;
+  }
 
-      if (unit.id === supportedUnit.id) {
-        if (highlightedTerritories.includes(supportedUnit.territory)) {
-          onSetOrder(supportingUnit.id, {
-            unit_id: supportingUnit.id,
-            unit_type: supportingUnit.type,
-            territory: supportingUnit.territory,
-            action: "support",
-            target: supportedUnit.territory,
-            target_of_support: supportedUnit.territory,
-          });
-
-          resetSelection();
-          return;
-        }
-      }
+  if (unit.id === supportedUnit.id) {
+    const supportedBase = getBaseTerritory(supportedUnit.territory);
+    if (highlightedTerritories.includes(supportedBase)) {
+      onSetOrder(supportingUnit.id, {
+        unit_id: supportingUnit.id,
+        unit_type: supportingUnit.type,
+        territory: supportingUnit.territory,
+        action: "support",
+        target: supportedBase,
+        target_of_support: supportedUnit.territory,
+      });
 
       resetSelection();
       return;
     }
+  }
+
+  resetSelection();
+  return;
+}
+
 
     // Step 2: A unit is already selected, and we click another unit.
     if (selectedUnit) {
@@ -598,41 +613,64 @@ export default function DiplomacyMap({
         supportedUnit: unit,
       });
 
-      const supportingUnitValidMoves = getValidMoves(selectedUnit.type, selectedUnit.territory);
-      let supportedUnitValidMoves = getValidMoves(unit.type, unit.territory);
-      if (unit.type === "army") {
-        const convoyDests = getAllConvoyDestinations(unit.territory, units);
-        supportedUnitValidMoves = [...supportedUnitValidMoves, ...convoyDests];
-      }
+      // Normalize to BASE ids first
+const supportingUnitValidMovesBase = [
+  ...new Set((getValidMoves(selectedUnit.type, selectedUnit.territory) || []).map(getBaseTerritory))
+];
 
-      const validSupportMoveDestinations = supportedUnitValidMoves.filter((dest) =>
-        canSupportMoveToTerritory(supportingUnitValidMoves, dest)
-      );
+let supportedUnitValidMovesBase = [
+  ...new Set((getValidMoves(unit.type, unit.territory) || []).map(getBaseTerritory))
+];
 
-      const canSupportHold = supportingUnitValidMoves.includes(unit.territory);
+if (unit.type === "army") {
+  const convoyDestsBase = getAllConvoyDestinations(unit.territory, units) || []; // already base
+  supportedUnitValidMovesBase = [...new Set([...supportedUnitValidMovesBase, ...convoyDestsBase])];
+}
 
-      const territoriesToHighlight = [...validSupportMoveDestinations];
-      if (canSupportHold) territoriesToHighlight.push(unit.territory);
+// Filter using BASE ids on both sides
+const validSupportMoveDestinations = supportedUnitValidMovesBase.filter((dest) =>
+  canSupportMoveToTerritory(supportingUnitValidMovesBase, dest)
+);
 
-      setHighlightedTerritories([...new Set(territoriesToHighlight)]);
-      setSelectedUnit(null);
-      return;
+// Hold check also in BASE
+const canSupportHold = supportingUnitValidMovesBase.includes(getBaseTerritory(unit.territory));
+
+const territoriesToHighlight = [...validSupportMoveDestinations];
+if (canSupportHold) territoriesToHighlight.push(getBaseTerritory(unit.territory));
+
+// Highlights are BASE ids
+setHighlightedTerritories([...new Set(territoriesToHighlight)]);
+setConvoyHighlightTerritories([]); // support highlights are not convoy-only
+setSelectedUnit(null);
+return;
     }
 
     // Step 1: Nothing is selected, and we click one of our own units.
-    if (unit.country === userPlayer.country) {
-      setSelectedUnit(unit);
-      let validMoves = getValidMoves(unit.type, unit.territory);
+if (unit.country === userPlayer.country) {
+  setSelectedUnit(unit);
 
-      if (unit.type === "army") {
-        const convoyDestinations = getAllConvoyDestinations(unit.territory, units);
-        validMoves = [...validMoves, ...convoyDestinations];
-      }
+  // Regular adjacency moves (normalize to BASE)
+  const regularMovesRaw = getValidMoves(unit.type, unit.territory) || [];
+  const regularMovesBase = [...new Set(regularMovesRaw.map((t) => getBaseTerritory(t)))];
 
-      setHighlightedTerritories([...new Set(validMoves)]);
-    } else {
-      resetSelection();
-    }
+  // Convoy destinations (armies only, already base ids from your helper)
+  let convoyDestinationsBase = [];
+  if (unit.type === "army") {
+    convoyDestinationsBase = getAllConvoyDestinations(unit.territory, units) || [];
+  }
+
+  // Convoy-only = purple; green trumps purple
+  const convoyOnlyBase = convoyDestinationsBase.filter((d) => !regularMovesBase.includes(d));
+
+  // Union for highlight (all BASE ids)
+  const unionBase = [...new Set([...regularMovesBase, ...convoyDestinationsBase])];
+
+  setHighlightedTerritories(unionBase);
+  setConvoyHighlightTerritories(convoyOnlyBase);
+} else {
+  resetSelection();
+}
+
   };
 
   const territoryList = Object.entries(territoryData).filter(([id]) => id !== "Switzerland");
@@ -774,8 +812,6 @@ export default function DiplomacyMap({
 
               {/* Layer 1: Territory Interaction Areas */}
               {territoryList.map(([id, terr]) => {
-                const isHighlighted = highlightedTerritories.includes(id);
-                const isSelectedRetreatTarget = selectedRetreatingUnit && isHighlighted;
                 const supplyCenterOwner = game.game_state?.supply_centers?.[id];
                 const isSupplyCenter = terr.supply_center;
 
@@ -789,21 +825,35 @@ export default function DiplomacyMap({
 
                 return (
                   <g key={id}>
-                    <circle
-                      cx={`${terr.x}%`}
-                      cy={`${terr.y}%`}
-                      r="3"
-                      fill={fillColor}
-                      stroke={
-                        isHighlighted ? "#16a34a" : selectedUnit?.territory === id ? "#fbbf24" : "transparent"
-                      }
-                      strokeWidth={
-                        isHighlighted || isSelectedRetreatTarget ? 0.5 : selectedUnit?.territory === id ? 0.5 : 0
-                      }
-                      strokeDasharray={isSelectedRetreatTarget ? "1 1" : "none"}
-                      className="transition-all duration-200 cursor-pointer"
-                      onClick={(e) => handleTerritoryClick(e, id)}
-                    />
+                    {(() => {
+const idBase = getBaseTerritory(id);
+const isHighlighted = highlightedTerritories.includes(idBase);
+const isSelectedRetreatTarget = selectedRetreatingUnit && isHighlighted;
+const isConvoyHighlight = convoyHighlightTerritories.includes(idBase);
+
+  return (
+    <circle
+      cx={`${terr.x}%`}
+      cy={`${terr.y}%`}
+      r="3"
+      fill={fillColor}
+      stroke={
+        isHighlighted
+          ? (isConvoyHighlight ? "#7c3aed" /* purple (convoy-only) */ : "#16a34a" /* green (regular) */)
+          : (selectedUnit?.territory === id ? "#fbbf24" : "transparent")
+      }
+      strokeWidth={
+        isHighlighted || isSelectedRetreatTarget
+          ? 0.5
+          : (selectedUnit?.territory === id ? 0.5 : 0)
+      }
+      strokeDasharray={isSelectedRetreatTarget ? "1 1" : "none"}
+      className="transition-all duration-200 cursor-pointer"
+      onClick={(e) => handleTerritoryClick(e, id)}
+    />
+  );
+})()}
+
                   </g>
                 );
               })}
@@ -1108,7 +1158,7 @@ export default function DiplomacyMap({
   const isConvoyCandidate =
     convoyFlow?.step === "pick_army" &&
     unit.type === "army" &&
-    highlightedTerritories.includes(unit.territory);
+    highlightedTerritories.includes(getBaseTerritory(unit.territory));
 
   const isConvoyChosenArmy =
     convoyFlow?.step === "pick_destination" &&
@@ -1264,9 +1314,19 @@ export default function DiplomacyMap({
         size="sm"
         onClick={() => {
           setSelectedUnit(unitMenu.unit);
-          setSupportState({ step: null, supportingUnit: null, supportedUnit: null, convoyedArmy: null });
-          setHighlightedTerritories(getValidMoves("navy", unitMenu.unit.territory));
-          setUnitMenu(null);
+setSupportState({ step: null, supportingUnit: null, supportedUnit: null, convoyedArmy: null });
+
+const u = unitMenu.unit;
+// Navy “Move” = regular naval adjacencies; normalize to BASE ids
+const regularMovesRaw = getValidMoves("navy", u.territory) || [];
+const regularMovesBase = [...new Set(regularMovesRaw.map((t) => getBaseTerritory(t)))];
+
+setHighlightedTerritories(regularMovesBase);
+setConvoyHighlightTerritories([]); // fleets don’t get convoy-only dots
+
+setUnitMenu(null);
+
+
         }}
       >
         Move
@@ -1290,10 +1350,12 @@ export default function DiplomacyMap({
         size="sm"
         onClick={() => {
           const fleet = unitMenu.unit;
-          const convoyableArmyTerrs = units
-            .filter((u) => u.type === "army" && armyIsConvoyableViaFleet(u, fleet.territory, units))
-            .map((u) => u.territory);
-          setHighlightedTerritories([...new Set(convoyableArmyTerrs)]);
+          const convoyableArmyTerrsBase = units
+  .filter((u) => u.type === "army" && armyIsConvoyableViaFleet(u, fleet.territory, units))
+  .map((u) => getBaseTerritory(u.territory));
+
+setHighlightedTerritories([...new Set(convoyableArmyTerrsBase)]);
+
           setConvoyFlow({ step: "pick_army", fleet, army: null, destinations: null });
           setUnitMenu(null);
         }}
