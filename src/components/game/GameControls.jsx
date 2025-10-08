@@ -386,17 +386,23 @@ export default function GameControls({
                const dislodgedIds   = new Set((lastTurnResults.dislodged_units || []).map(u => String(u.unit?.id ?? u.id)));
 
                // For supports/convoys, we’ll infer “success” by whether the referenced move succeeded.
-               const isSupportSuccessful = (o) => {
-                 if (!o?.target_of_support) return false;
-                 // Support-to-move:
-                 if (o.target) {
-                   const fake = { territory: o.target_of_support, target: o.target };
-                   return successMoveSetFromTo.has(moveKeyFromTo(fake));
-                 }
-                 // Support-to-hold: consider it "successful" if the supported unit was not dislodged
-                 const supportedProv = canonProv(o.target_of_support);
-                 return !dislodgedByProv.has(supportedProv);
-               };
+              const isSupportSuccessful = (o) => {
+  if (!o?.target_of_support) return false;
+
+  const supBase = canonProv(o.target_of_support);
+  const tgtBase = o.target ? canonProv(o.target) : null;
+
+  // Treat (no target) OR (target equals the supported province) as support-to-hold
+  const isHoldSupport = !o.target || supBase === tgtBase;
+  if (isHoldSupport) {
+    return !dislodgedByProv.has(supBase);
+  }
+
+  // Otherwise it's support-to-move
+  const fake = { territory: o.target_of_support, target: o.target };
+  return successMoveSetFromTo.has(moveKeyFromTo(fake));
+};
+
 
                 const isConvoySuccessful = (o) => {
                 if (!o?.target) return false;

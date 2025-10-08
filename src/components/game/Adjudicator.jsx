@@ -305,25 +305,28 @@ export function adjudicate(units, rawOrders) {
   }
 
   for (const key of headToHeadPairs) {
-    const [aFrom, aTo] = key.split("->");
-    const bFrom = aTo;
-    const bTo = aFrom;
+  const [aFrom, aTo] = key.split("->");
+  const bFrom = aTo;
+  const bTo = aFrom;
 
-    const a = (entrantsByTarget.get(aTo) || []).find((e) => e.from === aFrom);
-    const b = (entrantsByTarget.get(bTo) || []).find((e) => e.from === bFrom);
-    if (!a || !b) continue;
+  const a = (entrantsByTarget.get(aTo) || []).find((e) => e.from === aFrom);
+  const b = (entrantsByTarget.get(bTo) || []).find((e) => e.from === bFrom);
+  if (!a || !b) continue;
 
-    if (a.str > b.str) {
-      successfulMoves.add(asId(a.unit.id));
-      // The loser defends in place with its HOLD strength (handled in general pass)
-    } else if (b.str > a.str) {
-      successfulMoves.add(asId(b.unit.id));
-    } else {
-      // tie -> both bounce at their destinations
-      bouncedTargets.add(aTo);
-      bouncedTargets.add(bTo);
-    }
+  if (a.str > b.str) {
+    successfulMoves.add(asId(a.unit.id));
+    // Bounce the loser's destination to prevent illegal "swap"
+    bouncedTargets.add(bTo);
+  } else if (b.str > a.str) {
+    successfulMoves.add(asId(b.unit.id));
+    // Bounce the loser's destination to prevent illegal "swap"
+    bouncedTargets.add(aTo);
+  } else {
+    // tie -> both bounce at their destinations
+    bouncedTargets.add(aTo);
+    bouncedTargets.add(bTo);
   }
+}
 
   // Phase E: Resolve simple attacks (non-head-to-head) vs present hold strengths.
   // Track provisional dislodgements (to revisit for convoy disruption & self-dislodge).
@@ -484,20 +487,23 @@ export function adjudicate(units, rawOrders) {
         }
       }
       for (const key of h2hPairs2) {
-        const [aFrom, aTo] = key.split("->");
-        const bFrom = aTo, bTo = aFrom;
-        const a = (entrantsByTarget2.get(aTo) || []).find((e) => e.from === aFrom);
-        const b = (entrantsByTarget2.get(bTo) || []).find((e) => e.from === bFrom);
-        if (!a || !b) continue;
-        if (a.str > b.str) {
-          successfulMoves2.add(asId(a.unit.id));
-        } else if (b.str > a.str) {
-          successfulMoves2.add(asId(b.unit.id));
-        } else {
-          bouncedTargets2.add(aTo);
-          bouncedTargets2.add(bTo);
-        }
-      }
+  const [aFrom, aTo] = key.split("->");
+  const bFrom = aTo, bTo = aFrom;
+  const a = (entrantsByTarget2.get(aTo) || []).find((e) => e.from === aFrom);
+  const b = (entrantsByTarget2.get(bTo) || []).find((e) => e.from === bFrom);
+  if (!a || !b) continue;
+  if (a.str > b.str) {
+    successfulMoves2.add(asId(a.unit.id));
+    bouncedTargets2.add(bTo);
+  } else if (b.str > a.str) {
+    successfulMoves2.add(asId(b.unit.id));
+    bouncedTargets2.add(aTo);
+  } else {
+    bouncedTargets2.add(aTo);
+    bouncedTargets2.add(bTo);
+  }
+}
+
 
       // simple attacks
       let dislodged2 = [];
@@ -592,6 +598,8 @@ export function adjudicate(units, rawOrders) {
     // Preserve exact target (keep coast suffix if present in order)
     newUnits[idx].territory = order.target;
   }
+// If a unit successfully moved, it cannot also be dislodged.
+dislodged = dislodged.filter((d) => !successfulMoves.has(asId(d.unit.id)));
 
   // Mark dislodged defenders
   for (const d of dislodged) {
