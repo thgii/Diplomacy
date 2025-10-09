@@ -2,7 +2,7 @@
 import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Save, RotateCcw, Plus, Minus, ShieldCheck, Skull, Send, Undo2, CheckCircle, XCircle, List } from "lucide-react";
+import { Plus, Minus, ShieldCheck, Skull, CheckCircle, XCircle, List } from "lucide-react";
 import { OrderList, RetreatOrderList } from "./OrderList";
 import { homeSupplyCenters, territories } from "./mapData";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -42,6 +42,7 @@ const moveKeyFromTo = (o) => `${canonProv(o.territory)}|${canonProv(o.target)}`;
 
 const WinterOrderList = ({ game, user, units: allUnits, winterActions, onSetWinterActions, adjustments, playerUnits }) => {
     const userPlayer = game.players.find(p => p.email === user.email);
+
     if (!userPlayer) return null;
 
     const myUnits = playerUnits;
@@ -287,6 +288,41 @@ export default function GameControls({
   const [isSaving, setIsSaving] = useState(false);
   const [saveMessage, setSaveMessage] = useState('');
   const userPlayer = game?.players?.find(p => p.email === user?.email);
+// ---- PHASE-AWARE FLAGS (add right after userPlayer) ----
+const phase = game?.current_phase;
+
+// Phase names in your app can be 'movement', 'retreat', 'retreats', 'winter', 'builds'.
+// Normalize to a small set so our checks are robust:
+const normPhase =
+  phase === 'retreats' ? 'retreat' :
+  phase === 'builds'   ? 'winter'  :
+  phase;
+
+// Who am I?
+const playerCountry = userPlayer?.country;
+
+// My units (used for winter adj math)
+const playerUnits = (units || []).filter(u => u.country === playerCountry);
+
+// SCs and adjustments
+const supplyCenterCount = userPlayer?.supply_centers ?? 0;
+const adjustments = supplyCenterCount - playerUnits.length; // >0 build, <0 disband, 0 none
+
+// My required retreats (if any)
+const retreatsRequired = game?.game_state?.retreats_required || [];
+const myRetreats = retreatsRequired.filter(r => r.unit.country === playerCountry);
+
+// Decide if action buttons should show this phase
+const needsWinterAction  = normPhase === 'winter'  && adjustments !== 0;
+const needsRetreatAction = normPhase === 'retreat' && myRetreats.length > 0;
+
+// In movement phases (spring/fall), buttons should show as usual.
+// In winter/retreat, show only if there’s something to do.
+const shouldShowActionButtons =
+  normPhase === 'winter'  ? needsWinterAction  :
+  normPhase === 'retreat' ? needsRetreatAction :
+  true;
+
 
   const handleSaveDraft = async () => {
     setIsSaving(true);
@@ -312,32 +348,56 @@ export default function GameControls({
       );
     }
 
-    if (game.current_phase === 'winter') {
-      const playerCountry = userPlayer.country;
-      const playerUnits = (units || []).filter(u => u.country === playerCountry);
-      const supplyCenterCount = userPlayer.supply_centers || 0;
-      const adjustments = supplyCenterCount - playerUnits.length;
+if (normPhase === 'winter') {
+  const playerCountry = userPlayer.country;
+  const playerUnits = (units || []).filter(u => u.country === playerCountry);
+  const supplyCenterCount = userPlayer?.supply_centers ?? 0;
+  const adjustments = supplyCenterCount - playerUnits.length;
 
-      return <WinterOrderList
-        game={game}
-        user={user}
-        adjustments={adjustments}
-        winterActions={winterActions}
-        onSetWinterActions={onSetWinterActions}
-        playerUnits={playerUnits}
-        units={units}
-      />
-    }
+  if (adjustments === 0) {
+    return (
+      <div className="text-center p-4 bg-slate-50 rounded-lg border">
+        <p className="text-sm text-slate-600">No adjustments required this Winter.</p>
+      </div>
+    );
+  }
 
-    if (game.current_phase === 'retreat') {
-      const retreatsRequired = game.game_state?.retreats_required || [];
-      const myRetreats = retreatsRequired.filter(r => r.unit.country === userPlayer.country);
-      return <RetreatOrderList
-                retreats={myRetreats}
-                orders={orders}
-                onSetRetreatOrder={onSetRetreatOrder}
-             />
-    }
+  return (
+    <WinterOrderList
+      game={game}
+      user={user}
+      adjustments={adjustments}
+      winterActions={winterActions}
+      onSetWinterActions={onSetWinterActions}
+      playerUnits={playerUnits}
+      units={units}
+    />
+  );
+}
+
+
+if (normPhase === 'retreat') {
+  const retreatsRequired = game.game_state?.retreats_required || [];
+  const myRetreats = retreatsRequired.filter(r => r.unit.country === userPlayer.country);
+
+  if (myRetreats.length === 0) {
+    return (
+      <div className="text-center p-4 bg-slate-50 rounded-lg border">
+        <p className="text-sm text-slate-600">You have no units that must retreat.</p>
+      </div>
+    );
+  }
+
+  return (
+    <RetreatOrderList
+      retreats={myRetreats}
+      orders={orders}
+      onSetRetreatOrder={onSetRetreatOrder}
+    />
+  );
+}
+
+
 
     return <OrderList orders={Object.values(orders || {})} onDeleteOrder={onDeleteOrder} />;
   };
@@ -508,10 +568,13 @@ export default function GameControls({
               ];
 
               if (orderedPowers.length === 0) {
-                 <div className="text-sm text-slate-500">
-                   No orders recorded for this round.
-                 </div>
-              }
+  return (
+    <div className="text-sm text-slate-500">
+      No orders recorded for this round.
+    </div>
+  );
+}
+
 
               return orderedPowers.map((power) => (
                 <div key={power} className="space-y-2">
@@ -551,48 +614,37 @@ export default function GameControls({
             </div>
           )}
 
-          {/* Action Buttons */}
-          <div className="flex flex-col gap-2">
-            {!isSubmitted ? (
-              <>
-                <Button
-                  onClick={handleSaveDraft}
-                  variant="outline"
-                  disabled={isResolving || isSaving}
-                >
-                  {isSaving ? (
-                    <>
-                      <RotateCcw className="w-4 h-4 mr-2 animate-spin" />
-                      Saving...
-                    </>
-                  ) : saveMessage ? (
-                    <>
-                      {saveMessage === 'Draft Saved!' ? <ShieldCheck className="w-4 h-4 mr-2 text-green-600" /> : <Skull className="w-4 h-4 mr-2 text-red-600" />}
-                      {saveMessage}
-                    </>
-                  ) : (
-                    <>
-                      <Save className="w-4 h-4 mr-2" />
-                      Save Draft
-                    </>
-                  )}
-                </Button>
-                <Button
-                  onClick={() => onSubmitOrders(true)}
-                  className="bg-blue-600 hover:bg-blue-700"
-                  disabled={isResolving || isSaving}
-                >
-                  <Send className="w-4 h-4 mr-2" />
-                  Finalize Orders
-                </Button>
-              </>
-            ) : (
-              <Button onClick={onUnsubmitOrders} variant="secondary" disabled={isResolving}>
-                <Undo2 className="w-4 h-4 mr-2" />
-                Unsubmit Orders
-              </Button>
-            )}
-          </div>
+{/* Action Buttons */}
+{shouldShowActionButtons && (
+  <div className="flex flex-col gap-2 mt-4">
+    {!isSubmitted ? (
+      <>
+        <Button
+          onClick={handleSaveDraft}
+          disabled={isResolving || isSaving}
+          variant="secondary"
+        >
+          Save Orders
+        </Button>
+
+        <Button
+          onClick={() => onSubmitOrders(true)}
+          className="bg-blue-600 hover:bg-blue-700 text-white"
+          disabled={isResolving || isSaving}
+        >
+          Finalize Orders
+        </Button>
+      </>
+    ) : (
+      <Button
+        onClick={onUnsubmitOrders}
+        variant="outline"
+        disabled={isResolving}
+      >
+        Unsubmit Orders
+      </Button>
+    )}
+  </div>
         </>
       ) : (
         <div className="text-center p-4 bg-slate-100 rounded-lg">
