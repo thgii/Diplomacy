@@ -645,6 +645,7 @@ if (normPhase === 'retreat') {
       </Button>
     )}
   </div>
+)}
         </>
       ) : (
         <div className="text-center p-4 bg-slate-100 rounded-lg">
