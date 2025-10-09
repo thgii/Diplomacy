@@ -1047,8 +1047,11 @@ if (Array.isArray(formattedOrders)) {
           const countries = new Set(retreatsRequired.map((r) => r.unit?.country).filter(Boolean));
           requiredPlayers = (game.players || []).filter((p) => countries.has(p.country) && !p.is_dummy);
         } else {
-          requiredPlayers = (game.players || []).filter((p) => !p.is_dummy);
-        }
+  const unitCountries = new Set((units || []).map((u) => u.country));
+  requiredPlayers = (game.players || []).filter(
+    (p) => !p.is_dummy && unitCountries.has(p.country)
+  );
+}
 
         const submittedEmails = new Set(submittedMoves.map((m) => m.email));
         const requiredEmails = new Set(requiredPlayers.map((p) => p.email));
