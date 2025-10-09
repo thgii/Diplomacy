@@ -3,7 +3,7 @@
 // Handles: holds, moves, support-to-hold/move, cutting support (with exception),
 // head-to-head, cycles, convoy validation & disruption, beleaguered garrisons,
 // self-dislodge prohibition, and legal retreats.
-// .
+//
 // Assumptions about unit shape (based on your app):
 //   unit: { id, country, type: 'army' | 'navy', territory: 'PROV' | 'PROV/COAST', dislodged? }
 //   order: {
