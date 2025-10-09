@@ -318,10 +318,13 @@ const needsRetreatAction = normPhase === 'retreat' && myRetreats.length > 0;
 
 // In movement phases (spring/fall), buttons should show as usual.
 // In winter/retreat, show only if there’s something to do.
+const hasUnits = playerUnits.length > 0;
+
 const shouldShowActionButtons =
   normPhase === 'winter'  ? needsWinterAction  :
   normPhase === 'retreat' ? needsRetreatAction :
-  true;
+  hasUnits; // movement: only show if player still has a unit
+
 
 
   const handleSaveDraft = async () => {
@@ -397,6 +400,14 @@ if (normPhase === 'retreat') {
   );
 }
 
+// Movement phase: if you have no units, show a friendly note instead of buttons/list
+if (normPhase !== 'winter' && normPhase !== 'retreat' && playerUnits.length === 0) {
+  return (
+    <div className="text-center p-4 bg-slate-50 rounded-lg border">
+      <p className="text-sm text-slate-600">You have no units on the board. You are a loser.</p>
+    </div>
+  );
+}
 
 
     return <OrderList orders={Object.values(orders || {})} onDeleteOrder={onDeleteOrder} />;
