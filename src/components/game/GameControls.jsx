@@ -407,7 +407,7 @@ if (normPhase === 'retreat') {
 if (normPhase !== 'winter' && normPhase !== 'retreat' && playerUnits.length === 0) {
   return (
     <div className="text-center p-4 bg-slate-50 rounded-lg border">
-      <p className="text-sm text-slate-600">You have no units on the board. You are a loser.</p>
+      <p className="text-sm text-slate-600">You have no units on the board. You are a loser. Except you Sean. You just had some bad luck in this game. Better luck next time.</p>
     </div>
   );
 }

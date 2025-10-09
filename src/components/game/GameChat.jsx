@@ -76,6 +76,7 @@ export default function GameChat({ game, user, messages, onSendMessage, onClose 
   const messagesEndRef = useRef(null); // Changed from scrollRef
 
   const normId = (v) => String(v ?? "public");
+  const gameFinished = game?.status === "finished";
 
 // --- Unread counter helpers/state ---
 
@@ -217,7 +218,7 @@ export default function GameChat({ game, user, messages, onSendMessage, onClose 
     // Process private threads from messages
     messages.forEach((msg) => {
       const id = getThreadId(msg);
-      if (id !== "public" && msg.thread_participants?.includes(user.email)) {
+      if (id !== "public" && (gameFinished || msg.thread_participants?.includes(user.email))) {
         if (!threadMap.has(id)) {
           const participantCountries = msg.thread_participants
             .map((email) => game.players?.find((p) => p.email === email)?.country)
@@ -241,7 +242,7 @@ export default function GameChat({ game, user, messages, onSendMessage, onClose 
 
 
     setThreads(Array.from(threadMap.values()));
-  }, [messages, game.players, user.email]);
+  }, [messages, game.players, user.email, gameFinished]);
 
   // Filter messages for active thread
   const threadMessages = messages.filter(
@@ -250,6 +251,7 @@ export default function GameChat({ game, user, messages, onSendMessage, onClose 
 
   const handleSendMessage = (e) => {
     e.preventDefault();
+    if (gameFinished) return;           // block sends after game end
     if (!newMessage.trim()) return;
 
     const currentThread = threads.find((t) => normId(t.id) === normId(activeThread));
@@ -262,6 +264,7 @@ export default function GameChat({ game, user, messages, onSendMessage, onClose 
   };
 
   const handleCreateThread = ({ participants, name }) => {
+    if (gameFinished) return;
     const threadId = `thread_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
     
     const newThread = {
@@ -356,6 +359,11 @@ export default function GameChat({ game, user, messages, onSendMessage, onClose 
       <div className="flex-1 flex flex-col min-h-0">
         {/* Thread Tabs */}
         <div className="border-b border-slate-200 p-2 flex-shrink-0">
+           {gameFinished && (
+            <div className="text-xs mb-2 italic opacity-70">
+              Game finished — all private channels are visible to everyone. Chat is read-only.
+            </div>
+          )}
           <div className="flex items-center gap-2 flex-wrap">
             {threads.map((thread) => (
               <Button
@@ -380,14 +388,16 @@ export default function GameChat({ game, user, messages, onSendMessage, onClose 
             ))}
 
 
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setShowCreateThread(true)}
-              className="h-8 text-xs border-dashed"
-            >
-              <Plus className="w-3 h-3" />
-            </Button>
+             {!gameFinished && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setShowCreateThread(true)}
+                className="h-8 text-xs border-dashed"
+              >
+                <Plus className="w-3 h-3" />
+              </Button>
+            )}
           </div>
         </div>
 
@@ -466,14 +476,14 @@ export default function GameChat({ game, user, messages, onSendMessage, onClose 
             <Input
               value={newMessage}
               onChange={(e) => setNewMessage(e.target.value)}
-              placeholder="Type your diplomatic message..."
+              placeholder={gameFinished ? "Game finished — chat is read-only." : "Type your diplomatic message..."}
               className="flex-1"
-              disabled={!activeThread}
+              disabled={!activeThread || gameFinished}
             />
             <Button 
               type="submit" 
               size="icon"
-              disabled={!newMessage.trim() || !activeThread}
+              disabled={!newMessage.trim() || !activeThread || gameFinished}
               className="bg-blue-600 hover:bg-blue-700"
             >
               <Send className="w-4 h-4" />
@@ -490,7 +500,7 @@ export default function GameChat({ game, user, messages, onSendMessage, onClose 
       </div>
 
       <CreateThreadDialog
-        open={showCreateThread}
+        open={showCreateThread && !gameFinished}
         onClose={() => setShowCreateThread(false)}
         players={game.players || []}
         currentUserEmail={user.email}
