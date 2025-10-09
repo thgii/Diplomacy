@@ -304,6 +304,9 @@ const playerCountry = userPlayer?.country;
 // My units (used for winter adj math)
 const playerUnits = (units || []).filter(u => u.country === playerCountry);
 
+// NEW: remaining (by units) = has at least one unit
+const isSurvivor = playerUnits.length > 0;
+
 // SCs and adjustments
 const supplyCenterCount = userPlayer?.supply_centers ?? 0;
 const adjustments = supplyCenterCount - playerUnits.length; // >0 build, <0 disband, 0 none
@@ -612,18 +615,25 @@ if (normPhase !== 'winter' && normPhase !== 'retreat' && playerUnits.length === 
         <>
           {/* Draw Feature */}
           {game?.status === 'in_progress' && (
-            <div className="flex items-center space-x-2 pt-2 border-t">
-              <Checkbox
-                id="vote-draw"
-                checked={userHasVotedDraw}
-                onCheckedChange={(checked) => onVoteDraw(checked)}
-                disabled={isSubmitted || isResolving}
-              />
-              <Label htmlFor="vote-draw" className="text-sm font-medium">
-                Vote for Draw ({game.draw_votes?.length || 0}/{activePlayers.length})
-              </Label>
-            </div>
-          )}
+  isSurvivor ? (
+    <div className="flex items-center space-x-2 pt-2 border-t">
+      <Checkbox
+        id="vote-draw"
+        checked={userHasVotedDraw}
+        onCheckedChange={(checked) => onVoteDraw(checked)}
+        disabled={isSubmitted || isResolving}
+      />
+      <Label htmlFor="vote-draw" className="text-sm font-medium">
+        Vote for Draw ({game.draw_votes?.length || 0}/{activePlayers.length})
+      </Label>
+    </div>
+  ) : (
+    <div className="text-xs text-slate-500 pt-2 border-t">
+      Eliminated players don’t vote in draws.
+    </div>
+  )
+)}
+
 
 {/* Action Buttons */}
 {shouldShowActionButtons && (
