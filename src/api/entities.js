@@ -47,9 +47,27 @@ export const Game = {
     }
   },
 
-  async get(id) {
-    return http(`/games/${id}`);
+    async get(id) {
+    // We need the ETag header, so use fetch directly instead of http()
+    const API_BASE = import.meta.env.VITE_API_BASE || "/api";
+    const res = await fetch(`${API_BASE}/games/${id}`, {
+      method: "GET",
+      credentials: "include",
+      headers: { "Cache-Control": "no-cache" },
+    });
+    if (!res.ok) {
+      const msg = await res.text().catch(() => "");
+      throw { error: msg || res.statusText || `HTTP ${res.status}` };
+    }
+    const bodyText = await res.text().catch(() => "");
+    const data = bodyText ? JSON.parse(bodyText) : null;
+    if (data) {
+      const etag = res.headers.get("ETag");
+      if (etag) data._etag = etag;
+    }
+    return data;
   },
+
 
   async create(data) {
     // Normalize field names from your form -> API expects snake_case
@@ -67,11 +85,45 @@ export const Game = {
   },
 
   async update(id, patch) {
-    return http(`/games/${id}`, {
+    // Ensure we send If-Match and a numeric version for the CAS
+    const API_BASE = import.meta.env.VITE_API_BASE || "/api";
+
+    // If caller didn't pass version/etag in patch, fetch current first
+    let etag = patch?._etag;
+    let version = typeof patch?.version === "number" ? patch.version : undefined;
+
+    if (!etag || version === undefined) {
+      const fresh = await this.get(id);
+      etag = fresh?._etag;
+      version = typeof fresh?.version === "number" ? fresh.version : 0;
+    }
+
+    const res = await fetch(`${API_BASE}/games/${id}`, {
       method: "PATCH",
-      body: JSON.stringify(patch),
+      credentials: "include",
+      headers: {
+        "Content-Type": "application/json",
+        ...(etag ? { "If-Match": etag } : {}),
+      },
+      body: JSON.stringify({ ...patch, version }),
     });
+
+    const bodyText = await res.text().catch(() => "");
+    if (!res.ok) {
+      let msg;
+      try { msg = bodyText ? JSON.parse(bodyText) : {}; }
+      catch { msg = { error: bodyText || res.statusText || `HTTP ${res.status}` }; }
+      throw msg;
+    }
+
+    const data = bodyText ? JSON.parse(bodyText) : null;
+    if (data) {
+      const newEtag = res.headers.get("ETag");
+      if (newEtag) data._etag = newEtag;
+    }
+    return data;
   },
+
 
   async delete(id) {
     return http(`/games/${id}`, { method: "DELETE" });

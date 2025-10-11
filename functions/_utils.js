@@ -14,3 +14,11 @@ export function json(data, status = 200, headers = {}) {
     headers: { "content-type": "application/json; charset=utf-8", ...headers },
   });
 }
+
+// ETag helper for optimistic concurrency (quoted string per HTTP spec)
+export function etagFromVersion(v) {
+  const n = Number(v);
+  const safe = Number.isFinite(n) ? n : 0;
+  return `"v${safe}"`;
+}
+

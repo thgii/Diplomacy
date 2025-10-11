@@ -42,7 +42,9 @@ export async function onRequestGet({ request, params, env }) {
     `SELECT * FROM game_moves WHERE ${clauses.join(" AND ")} ORDER BY created_at DESC`
   ).bind(...binds).all();
 
-  return json(results.map(r => ({ ...r, orders: r.orders ? JSON.parse(r.orders) : [] })));
+  return json(
+    results.map((row) => ({ ...row, orders: row.orders ? JSON.parse(row.orders) : [] }))
+  );
 }
 
 export async function onRequestPost({ request, params, env }) {
@@ -53,12 +55,31 @@ export async function onRequestPost({ request, params, env }) {
   const body = await request.json().catch(() => ({}));
   const moveId = (globalThis.crypto?.randomUUID ? crypto.randomUUID() : Math.random().toString(36).slice(2));
 
+  // --- Guard: only accept orders for the game's current turn/phase ---
+  const { results: g } = await env.DB
+    .prepare("SELECT current_turn, current_phase FROM games WHERE id = ?")
+    .bind(id)
+    .all();
+  if (!g[0]) return new Response("Game not found", { status: 404 });
+
+  const { current_turn, current_phase } = g[0];
+  if (body.turn_number !== current_turn || body.phase !== current_phase) {
+    return new Response("Orders not accepted for stale phase", { status: 409 });
+  }
+
   await env.DB.prepare(
     `INSERT INTO game_moves (id, game_id, email, country, turn_number, phase, source_phase, orders, submitted)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
   ).bind(
-    moveId, id, body.email || null, body.country || null, body.turn_number, body.phase,
-    body.source_phase || null, JSON.stringify(body.orders || []), body.submitted ? 1 : 0
+    moveId,
+    id,
+    body.email || null,
+    body.country || null,
+    body.turn_number,
+    body.phase,
+    body.source_phase || null,
+    JSON.stringify(body.orders || []),
+    body.submitted ? 1 : 0
   ).run();
 
   const { results } = await env.DB.prepare("SELECT * FROM game_moves WHERE id = ?").bind(moveId).all();
